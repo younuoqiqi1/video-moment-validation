@@ -9,7 +9,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from vmv.cli import main
-from vmv.report import check_environment, run_status_stage, probe_tool_version
+from vmv.report import check_environment, run_status_stage, probe_tool_version, validate_output_paths
 
 
 def test_probe_tool_version_timeout():
@@ -503,3 +503,10 @@ def test_status_cli_html_unlink_failed_on_rollback_r2a(tmp_path: Path, capsys):
                 assert str(cli_html) in captured.out
 
 
+
+
+def test_status_cli_output_path_embedded_null_is_reported(tmp_path: Path):
+    """Path.resolve ValueError must become the same readable error as other bad paths."""
+    bad_path = Path("bad\0name.json")
+    with pytest.raises(OSError, match="路径解析失败"):
+        validate_output_paths(bad_path)
