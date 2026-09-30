@@ -111,7 +111,7 @@ python3 scripts/verify_offline_probe.py
 
 ## 6. 自动化测试证据
 
-### 6.1 Mac 本机全量自动化实测证据
+### 6.1 Mac 本机旧版只读探针测试记录（不覆盖本次新代码）
 - **执行环境**：macOS Darwin (arm64), Python 3.12.14, pytest-9.1.1
 - **执行命令**：
   ```bash
@@ -120,27 +120,37 @@ python3 scripts/verify_offline_probe.py
 - **实测结果**：**39/39 passed in 5.79s**
   - `tests/test_cli.py`: 6 passed
   - `tests/test_offline_probe.py`: 8 passed（字节精确全等、前后缀拒绝、多行/引号拒绝、GUI进程检测、CLI进程区分、Worker成功/超时、Controller清理）
-  - `tests/test_runner.py`: 21 passed（原 19 项审查边界测试 + 新增 2 项：`test_discover_pr_branch_tasks` 任务解析、`test_run_once_pr_branch_task_discovery_and_readonly_safety_gate` PR 任务只读安全门禁与 0 次 CLI 派发核验）
+  - `tests/test_runner.py`: 21 passed（当时的只读任务发现实现；后续已改为限定任务的授权执行路径）
   - `tests/test_runner_service.py`: 4 passed（launchd XML 生成、安装与卸载流程、状态解析、失败回滚）
 
 ### 6.2 Codex 远端 Linux 独立重跑验证记录
 - **执行环境**：Codex 独立 Linux x86_64 容器环境（提交 `483fba7`）
 - **执行命令**：`python3 -m pytest -q`
 - **复核结果**：**39 项全部通过**（见 `reviews/pr-3-483fba73c576cadb56c51708934c0110632921fd.md`）
-- **证据来源与口径说明**：Codex 独立 Linux 环境确认了 Python 逻辑与 PR 分支只读门禁单元测试的跨平台正确性；macOS 系统特有的 LaunchAgent 托管与真实 122 秒间隔轮询日志则由第 8 节中的 Mac 本机运行环境提供，两套测试与运行证据来源明确区分，互不混淆。
+- **证据来源与口径说明**：本条只对应旧提交 `483fba7`。第 8 节的 Mac 轮询日志也只证明当时版本能发现任务，不能证明新版授权执行路径已在用户 Mac 启动。
+
+### 6.3 新版授权执行路径的 Codex 独立验证
+- **执行环境**：Codex Linux 容器、临时隔离目录；起点为 PR #3 的 `fe5c804`，修复了暂时读取失败被误判为撤销授权的问题并增加了授权边界测试。
+- **执行命令**：`/tmp/vmv-pr3-testvenv/bin/python -m pytest -q`
+- **修复前实测**：`38 passed, 1 failed`；失败原因是暂时读取 GitHub 失败后，状态被后续撤销授权检查从 `ready` 改为 `blocked`。
+- **修复与补测后实测**：`45 passed in 2.39s`；含直接调用真实 `resolve_authorized_pr_task` 的 PR 关闭、草稿、身份、SHA 与任务文件版本检查。
+- **真实远端对象核对**：PR #5 为 open、非草稿，分支 `feat/stage1-media-import` 的提交 `20cd362cd88df183b062991a14f2ac50c9b6703f` 与任务文件 blob `d24aecccdbde1fce7dc28801936dcaeb2bbb564e` 与限定值一致；本次用真实 Git 对象和从 GitHub 读取的 PR 状态检查了任务解析，但未在用户 Mac 派发 AGY CLI。
+- **未验证项**：用户 Mac 的已安装程序是否更新、launchd 是否继续轮询、AGY 是否实际启动 PR #5 的视频补充任务，以及关闭 GUI 后的后台运行，均没有本次独立实测。
 
 
 ---
 
 ## 7. 守则与门禁约束
 
-- **不合并 PR**：保持 PR #1、PR #2、PR #3 处于未合并状态；
-- **不推进下一阶段**：严禁越权进入阶段 1（视频处理）；
+- **不自动合并 PR**：PR #3 与 PR #5 均保持待复核；
+- **阶段边界**：只允许用户已授权的 PR #5 阶段 1 补充任务，不进入阶段 2；
 - **PR #3 状态**：保持 `awaiting_review` 等待 Codex 复核。
 
 ---
 
-## 8. GitHub 定时 120 秒轮询与 PR #5 任务只读发现验证 (tasks/runner-verify-120s.md)
+## 8. 历史记录：GitHub 定时 120 秒轮询与 PR #5 任务只读发现验证 (tasks/runner-verify-120s.md)
+
+本节日志来自新版授权执行代码之前的 Mac 探针，保留原始证据；当前执行路径与限制见第 6.3 节。
 
 ### 8.1 launchd 服务配置与托管状态
 - **服务标签**：`com.vmv.runner`
@@ -174,10 +184,10 @@ python3 scripts/verify_offline_probe.py
   - **任务文件**：`tasks/stage1-preview-followup.md`
   - **解析标题**：`AGY 任务：阶段 1 镜头清单核对补充`
 
-### 8.3 严格只读安全门禁（零视频处理）
-- **门禁策略**：按照任务要求，当前轮次仅验证任务发现与拉取能力。
-- **持久化状态**：发现后写入 `.vmv-runner/state.json`，状态置为 `discovered_readonly`，`attempt=0`，`pid=null`。
-- **执行阻断**：严格跳过 `execute_cli_task`，绝不派发 AGY CLI 执行阶段 1 的视频切分或任何多媒体处理，杜绝越权处理。
+### 8.3 当时版本的只读门禁（零视频处理）
+- **当时策略**：该轮只验证任务发现与拉取能力。
+- **当时状态**：发现后写入 `.vmv-runner/state.json`，状态为 `discovered_readonly`，`attempt=0`，`pid=null`。
+- **当时结果**：跳过 `execute_cli_task`；此记录不代表当前代码仍跳过已授权任务。
 
 ### 8.4 真实 launchd 轮询时间戳证据（相隔 120 秒）
 由 macOS launchd 守护进程根据 `StartInterval=120` 自动触发，并记录在 `.vmv-runner/runner.log` 中的真实轮询时间戳证据：
@@ -191,6 +201,5 @@ python3 scripts/verify_offline_probe.py
   [2026-10-01 00:48:57] [轮询检查] git fetch 同步完成，origin/main: 0b9ff3e
   [2026-10-01 00:48:58] [PR 任务监控] PR #5 (feat/stage1-media-import@20cd362): tasks/stage1-preview-followup.md 状态: discovered_readonly
   ```
-- **门禁与处理结论**：两次真实轮询均成功通过 `git fetch origin` 获取最新远端分支 SHA 并检测到 PR #5 中的任务文件，且均受安全门禁拦截，`execute_cli_task` 执行次数严格为 0，零多媒体处理、零工作区破坏。
-
+- **当时轮询结论**：两次记录显示旧版服务检测到 PR #5 任务文件，且当时未派发 CLI。当前版本的 Mac 实际执行情况尚无对应日志。
 
