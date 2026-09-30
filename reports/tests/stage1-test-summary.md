@@ -4,7 +4,8 @@
 - **Python 版本**：Python 3.12.14 (Darwin arm64)
 - **测试框架**：pytest 9.1.1, pluggy 1.6.0
 - **运行命令**：`.venv/bin/pytest tests/test_cli.py tests/test_media.py -v`
-- **判定总览**：**31/31 passed in 0.79s**（全部通过，实测非声称）
+- **AGY 原始执行**：**31/31 passed in 0.79s**（Mac 本机记录）
+- **Codex 复核后执行**：新增 HTML 特殊文件名转义回归测试后，Linux 全量测试 **32/32 passed in 1.96s**。
 
 ---
 
@@ -22,6 +23,7 @@
 | `test_media` | `test_detect_scenes_synthetic` | `PASSED` | 场景切分时间点连续性与边界覆盖校验 |
 | `test_media` | `test_run_stage1_media_import_empty_dir_blocked` | `PASSED` | 无视频素材时生成 `import_blocked.json` 且状态为 blocked |
 | `test_media` | `test_run_stage1_media_import_synthetic_success` | `PASSED` | 端到端生成 manifest、scenes JSON 与 summary.html |
+| `test_media` | `test_generate_summary_html_escapes_untrusted_media_text` | `PASSED` | 媒体文件名、ID、路径和字幕文本中的 HTML 标签按普通文字显示 |
 | `test_cli` | `test_cli_import_empty_directory_returns_1` | `PASSED` | 命令行 `vmv import` 空素材目录返回 1 并报告问题 |
 | `test_cli` | `test_cli_import_success_mock` | `PASSED` | 命令行 `vmv import` 参数解析与正常流转返回 0 |
 | `test_cli` | `test_probe_tool_version_timeout` | `PASSED` | 阶段 0 工具版本探测超时回归 |
@@ -50,3 +52,4 @@
 
 - 阶段 1 新增测试均使用合成微型视频（`testsrc` + `sine`）或精确计算，测试耗时极短（< 0.8s），完全不依赖 200MB 的真实电视剧文件；
 - 格式识别、时间码边界、错误提示等均具备完全可独立运行与重跑的自动化测试覆盖。
+- HTML 注入回归测试使用构造的恶意文件名与字幕摘要，不依赖真实素材。
