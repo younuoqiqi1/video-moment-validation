@@ -2,8 +2,8 @@
 
 - **日期**：2026-09-30（Asia/Shanghai）
 - **关联任务**：`tasks/local-runner-probe-first.md`
-- **关联审查**：`reviews/pr-3-cbed914ec0392411013541247344a1f10ed6d26c.md`（A–E 项）
-- **代码提交**：`e6fc99e1e85020fd844992c5da40c83160b4e34f`
+- **关联审查**：`reviews/pr-3-02629fbae0cf92bec45ae7f694a343f2a5ab4451.md`（R1–R4 修正）
+- **分支**：`feat/local-task-runner`
 - **状态**：`implementation_complete` / `awaiting_review`
 
 ---
@@ -11,7 +11,7 @@
 ## 1. 真实可执行文件与调用参数模板
 
 - **可执行文件路径**：`/Users/yoyotaozhou/.local/bin/agy`
-- **版本信息**：`1.2.14`（非软链接或猜测文件，大小约 187MB 的原生二进制）
+- **版本信息**：`1.2.14`（原生二进制，大小约 187MB）
 - **验证支持的参数**：
   - `--print`：非交互式单次运行并输出结果（别名 `-p`、`--prompt`）；
   - `--model gemini-3.8-flash-high`：显式指定项目要求模型（实测 `agy models` 返回并支持）；
@@ -24,9 +24,9 @@
 
 ---
 
-## 2. 独立终端真实 CLI 探测验证
+## 2. 独立终端真实 CLI 探测验证 (探针 1)
 
-- **结论**：`passed`
+- **结论**：`完成` (passed)
 - **测试环境**：独立临时 Git 仓库 `/tmp/agy_cli_probe_209bc29f`（与业务代码 100% 隔离）
 - **随机标识令牌**：`TOKEN_2c1aa6073cfcdb2c`
 - **无副作用探测任务**：
@@ -44,9 +44,9 @@
 
 ---
 
-## 3. 用户级后台真实 CLI 探测验证 (launchd)
+## 3. 用户级后台真实 CLI 探测验证 (launchd 探针 2)
 
-- **结论**：`passed`
+- **结论**：`完成` (passed)
 - **启动来源**：macOS 用户级 launchd 服务（临时标识 `com.vmv.probe_step5`）
 - **执行环境**：独立临时 Git 仓库 `/tmp/agy_bg_probe_d87e2d9c`
 - **随机标识令牌**：`TOKEN_BG_96caf0ce8a808e85`
@@ -66,63 +66,66 @@
 
 ---
 
-## 4. App 关闭条件验证状态
+## 4. 原审查 A–F 项对照状态总表
 
-- **结论**：`not_verified`
-- **原因说明**：为防止在交互会话中强行退出宿主 Antigravity App 导致与用户会话失联，本轮未在当前开发会话中强行关闭 App。
-- **独立离线验证程序准备**：
-  - 已编写就绪独立验证程序：[`scripts/verify_offline_probe.py`](file:///Users/yoyotaozhou/Documents/video-moment-validation/scripts/verify_offline_probe.py)；
-  - **用户一步操作指南**：
-    1. 在系统原生终端（Terminal.app）中运行：
-       ```bash
-       python3 scripts/verify_offline_probe.py
-       ```
-    2. 程序会通过 launchd 自动排期并在 15 秒后触发探测；
-    3. 在 15 秒内完全退出 Antigravity / 宿主 IDE（`Cmd + Q`）；
-    4. 45 秒后，在终端查看最终写入结果：
-       ```bash
-       cat /tmp/agy_offline_probe_result.json
-       ```
+按照 Codex 审查报告 `reviews/pr-3-02629fbae0cf92bec45ae7f694a343f2a5ab4451.md` 的要求，原 A–F 审查项对齐结果如下：
+
+| 审查项 | 对应要求 | 当前状态 | 修复与验证说明 |
+|:---|:---|:---:|:---|
+| **A 项** | **工作区与分支保护** | **完成** | `TaskState` 新增 `head_branch` 与 `worktree_path`；`prepare_worktree_for_task` 通过 `git worktree list --porcelain` 核验；杜绝 `git worktree add -B`（绝不 reset 分支）、杜绝 `shutil.rmtree`（保留未知目录哨兵文件）；已有分支直接使用 `git worktree add <dir> <branch>` 保留已有 extra commit；非 Git 根目录直接报错 blocked；分支被占用直接报错 blocked。真实临时 Git 仓库测试已全数覆盖通过。 |
+| **B 项** | **远程准据与 fetch 同步可靠性** | **完成** | 彻底移除生产代码中的 `PYTEST_CURRENT_TEST` 绕过分支；`run_once()` 显式核验 `fetch_remote_main()`，失败立即记录脱敏诊断并返回 1，保留原任务状态且 CLI 派发次数为 0；成功后固定本轮 `origin/main` 快照 SHA，统一读取 queue/task/review；远程队列缺失或损坏时明确记录诊断并中断，不静默伪装正常；远程撤销授权的任务自动置为 blocked。 |
+| **C 项** | **真实 PR 元数据与交付一致性** | **完成** | PR 查询获取完整元数据（`number`、`state`、`draft`、`head_ref`、`head_sha`）；CLI 退出 0 后必须通过 `_verify_delivery` 核对存在 open 且非 draft 的 PR，且 `worktree HEAD == remote branch SHA == PR head_sha`，否则置为 blocked 拒绝进入 `awaiting_review`；`sync_existing_deliveries` 将 PR #2 正确附着到分支 `task/stage0-review-fix`；`_parse_review_conclusion` 严格解析固定结论字段，只接受枚举，杜绝 `not_pass_with_notes` 等误判。 |
+| **D 项** | **去重记录永久持久化与无提交保护** | **完成** | `dispatched_reviews` 永久持久化，同一提交审查修改仅派发一次；CLI 执行退出 0 但工作区 HEAD 未产生新提交时，立即标记 blocked，杜绝死循环。 |
+| **E 项** | **子进程实时 PID 持久化与异常防护** | **完成** | `on_started` 回调在子进程启动后立即写回 `state.json`；若 `on_started` 发生异常，立即通过 `proc.kill()` 与 `proc.wait()` 回收子进程并返回 1，标记 blocked，杜绝无 PID 记录的子进程裸跑。 |
+| **F 项** | **离线/闭门后台执行验证** | **未验证** (已就绪) | 避免在交互开发会话中强杀宿主 Antigravity GUI 导致连接中断，本项实测需由用户在独立原生终端触发；已完成纯 Python 重构（`scripts/verify_offline_probe.py`），支持严格字节比对、真实 GUI 进程（`/Applications/Antigravity.app/Contents/MacOS/Antigravity`）检测以及 launchd 生命周期回收，相关单元测试 8/8 全数通过。 |
 
 ---
 
-## 5. 任务调度器 A–E 项修复与回归实测
+## 5. 离线/闭门验证程序说明与用户操作指南 (F 项)
 
-针对 `reviews/pr-3-cbed914ec0392411013541247344a1f10ed6d26c.md` 指出的缺陷，生产调度器已全面完成最小充分修复：
+验证程序文件：[`scripts/verify_offline_probe.py`](scripts/verify_offline_probe.py)
 
-1. **A 项（网络与注入防范）**：
-   - `check_process_alive` 严格校验 `isinstance(pid, int) and pid > 0`，杜绝任何参数注入；
-   - `fetch_remote_main` 校验 `shutil.which("git")` 并增加 30s 超时与异常捕获。
-2. **B 项（远程准据与未授权隔离）**：
-   - `load_queue_tasks` 与 `get_task_prompt` 严格以 `origin/main` 远端为唯一准据；
-   - 远端队列文件损坏、解析异常或缺失时返回空列表并记录错误，**严禁静默回退至本地未授权草稿**。
-3. **C 项（精确 PR 与当前提交匹配）**：
-   - 构造目标 `reviews/pr-<number>-<40位sha>.md`，通过 `git show origin/main:reviews/...` 读取；
-   - 报告仅缓存在 `.vmv-runner/reviews/`，不污染工作区；
-   - 新增 `_parse_review_conclusion` 精确解析 `pass` / `pass_with_notes` / `request_changes` / `blocked`，杜绝子串误判；
-   - GitHub API 查询严格筛选 `state=open` 且 `draft=false`。
-4. **D 项（去重记录永久持久化与无提交保护）**：
-   - `TaskState` 新增独立 `dispatched_reviews` 列表；
-   - 派发前将 `f"{st.pr_number}:{st.head_sha}"` 先行存入磁盘，后续成功/失败/重启均不删除该键；
-   - 若 CLI 运行成功但工作区 HEAD 未产生新提交（与被审查提交相同），立即标记 `blocked`（“未产生可审查的新交付”），防止无限循环。
-5. **E 项（子进程存活期间实时持久化 PID）**：
-   - `execute_cli_task` 引入 `on_started(pid)` 回调，在 `communicate()` 阻塞等待之前立即写回 `state.json`；
-   - 超时后通过 `proc.kill()` 与 `proc.wait(timeout=5.0)` 及时回收子进程。
-6. **服务生命周期加固**：
-   - `install_service` 与 `stop_service` 严格校验卸载退出状态；若卸载失败，保留配置文件并如实返回错误原因。
+### 5.1 架构与防漏设计
+1. **纯 Python 控制器与 Worker**：完全废弃易发生注入或转义损坏的 shell heredoc，参数通过 Python 数组传递；
+2. **字节级精确校验**：
+   - 严格比较 `target_file.read_bytes() == f"PROBE_RESULT={token}\n".encode("utf-8")`；
+   - 任何前后缀（如 `WRONG PREFIX ...`）、引号或多行内容均判为 False；
+3. **宿主 GUI 进程鉴权**：
+   - 严格根据 `/Applications/Antigravity.app/Contents/MacOS/Antigravity` 签名检测 GUI 应用是否存在；
+   - 明确区分 CLI 进程（`agy`）与 GUI 应用，输出独立字段 `app_closed`、`app_closed_verified` 与证据；
+4. **生命周期自动回收**：
+   - 控制器在 `finally` 块中显式执行 `launchctl unload -w` 卸载探针服务，并确认删除 plist 文件，不残留任何常驻服务。
 
-### 自动化测试证据
-- **调度器专项测试**：`tests/test_runner.py`（**20/20 passed in 0.20s**，含跨两轮去重实测、实时 PID 写入断言、损坏远程队列隔离、结论解析回归）
-- **后台服务专项测试**：`tests/test_runner_service.py`（**4/4 passed in 0.03s**）
-- **全量测试套件**：`.venv/bin/pytest`（**30/30 passed in 0.21s**）
+### 5.2 用户验证指南
+用户若需在关闭 Antigravity 宿主 GUI 下独立核验，请打开 macOS 系统原生 **终端（Terminal.app）**，执行以下单个命令：
+```bash
+python3 scripts/verify_offline_probe.py
+```
+**交互过程**：
+1. 终端提示服务排期成功并进入 15 秒倒计时；
+2. 在 15 秒内完全退出 Antigravity 应用（按 `Cmd + Q`）；
+3. 控制器自动监听并输出真实关闭与 CLI 探针结果；
+4. 控制器在运行完毕后自动清理临时 launchd 服务与 plist 配置文件。
 
 ---
 
-## 6. Git 任务自动接收与生产边界
+## 6. 自动化测试证据
 
-- **远端队列限制说明**：经核对，当前远程 `origin/main` 主分支尚未包含 `tasks/queue.json`（队列定义文件仍在 PR #3 分支中）。因此，生产远程任务自动接收处于就绪但等待合并状态。
-- **守则边界**：
-  - 本次不合并 PR #1、PR #2、PR #3；
-  - 不认定用户验收；
-  - 严禁越权进入阶段 1（视频处理）；
-  - 保持 `awaiting_review` 等待复核。
+全量测试执行环境：macOS Darwin (arm64), Python 3.12.14, pytest-9.1.1
+执行命令：
+```bash
+.venv/bin/pytest
+```
+测试结果：**37/37 passed in 3.77s**
+- `tests/test_cli.py`: 6 passed
+- `tests/test_offline_probe.py`: 8 passed（字节精确全等、前后缀拒绝、多行/引号拒绝、GUI进程检测、CLI进程区分、Worker成功/超时、Controller清理）
+- `tests/test_runner.py`: 19 passed（R1真实Git工作区保留extra commit、保留未知目录哨兵、主checkout脏文件保留、分支占用冲突报错、非Git根目录blocked；R2断网退出并保留状态、远端撤销授权自动blocked、远端队列损坏诊断退出；R3无PR/草稿PR/SHA不一致拒绝awaiting_review、三方一致进入awaiting_review、严格结论解析、启动回调异常终止子进程、PR #2 分支绑定；以及进程中断、去重等流转）
+- `tests/test_runner_service.py`: 4 passed
+
+---
+
+## 7. 守则与门禁约束
+
+- **不合并 PR**：保持 PR #1、PR #2、PR #3 处于未合并状态；
+- **不推进下一阶段**：严禁越权进入阶段 1（视频处理）；
+- **PR #3 状态**：保持 `awaiting_review` 等待 Codex 复核。

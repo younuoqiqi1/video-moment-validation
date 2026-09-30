@@ -1,9 +1,12 @@
-# 本地 AGY 自动接任务服务实现与验证报告
+# 本地 AGY 自动接任务服务实现与验证报告 [历史归档版本]
+
+> ⚠️ **历史版本提示**：本文档为早期 P1-1 ~ P1-3 实施阶段的历史留存报告。
+> 最新经过独立探针验证及 R1–R4 深度修复的准据报告请参阅 [reports/local-runner-probe.md](local-runner-probe.md)。
 
 - **日期**：2026-09-30 (Asia/Shanghai)
 - **分支**：`feat/local-task-runner`
 - **实施依据**：`docs/superpowers/plans/2026-09-30-local-task-runner.md`、`tasks/execution-policy.md`
-- **复核依据**：`reviews/pr-3-8dac98825a1277c252da5b4f2943eeccd55e397c.md` (P1-1 ~ P1-3 修正)
+- **复核依据**：`reviews/pr-3-8dac98825a1277c252da5b4f2943eeccd55e397c.md` (早期复核)
 - **交付目标**：实现并启用本地自动接任务后台服务，形成安全获取远端任务、独立工作区隔离、request_changes 修正闭环的完整流水线，提交 PR 等待 Codex 复核。
 
 ---
