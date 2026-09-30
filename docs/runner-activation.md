@@ -8,7 +8,7 @@
 cd "$HOME/Documents/video-moment-validation" && mkdir -p .vmv-runner && git fetch origin '+refs/heads/feat/local-task-runner:refs/remotes/origin/feat/local-task-runner' && git show origin/feat/local-task-runner:scripts/activate_local_runner.py > .vmv-runner/activate_local_runner.py && .venv/bin/python .vmv-runner/activate_local_runner.py
 ```
 
-成功时会显示 `成功安装并启用后台轮询服务` 和代码版本。原项目当前分支及未提交内容不会被切换、reset 或覆盖；程序代码存放在 Git 忽略的 `.vmv-runner/code` 独立 worktree。若这个位置有未知文件或未提交修改，启动会停止并保留文件。安装时只替换同名 `com.vmv.runner` 服务。关闭 Antigravity 图形应用后能否继续执行仍需单独探针证明。
+成功时会显示 `成功安装并启用后台轮询服务` 和代码版本。原项目当前分支及未提交内容不会被切换、reset 或覆盖；程序代码存放在 Git 忽略的 `.vmv-runner/code` 独立 worktree。PR #5 的执行目录也是独立的，即使原分支正在使用，仍能核对任务；仅在本机忽略目录中链接现有视频和阶段 1 清单，不提交素材。若独立目录有未知文件或未提交修改，启动会停止并保留文件。安装时只替换同名 `com.vmv.runner` 服务。关闭 Antigravity 图形应用后能否继续执行仍需单独探针证明。
 
 核对是否真正开始处理：
 

@@ -397,6 +397,10 @@ class LocalTaskRunner:
         )
         prompt = (
             "执行下方唯一已授权的 PR #5 阶段 1 补充任务。严格只处理任务文件列出的阶段 1 内容。"
+            "当前目录是 PR #5 的独立 detached worktree；视频和阶段 1 输出通过本机忽略目录链接可读。"
+            f"本机虚拟环境可用 {self.repo_root / '.venv' / 'bin' / 'python'}，执行工作区代码时设置 PYTHONPATH=src。"
+            "不要修改原视频。完成代码提交后明确推送到 PR 分支：git push origin HEAD:feat/stage1-media-import，"
+            "再核对 PR head 与本地 HEAD 相同。"
             "如果本机素材不存在、工作区有用户改动或无法核实真实视频，停止并在 PR 中说明阻塞；"
             "不得伪造观察结果，不得上传素材/帧图，不得合并 PR，不得开始阶段 2。"
             "任务文件内容如下：\n\n"
@@ -511,6 +515,9 @@ class LocalTaskRunner:
         target_branch = branch_name or f"task/{task.id}"
         target_branch = target_branch.replace("refs/heads/", "")
 
+        if task.id == AUTHORIZED_PR_TASK["task_id"] and target_branch == AUTHORIZED_PR_TASK["branch"]:
+            return self._prepare_authorized_media_worktree(worktree_dir, target_branch)
+
         registered = self.get_registered_worktrees()
         reg_by_path: dict[str, dict[str, str]] = {}
         reg_by_branch: dict[str, str] = {}
@@ -613,6 +620,67 @@ class LocalTaskRunner:
         if res.returncode == 0:
             return worktree_dir, None
         return None, f"git worktree add 失败: {res.stderr.strip() or res.stdout.strip()}"
+
+    def _prepare_authorized_media_worktree(
+        self, worktree_dir: Path, target_branch: str
+    ) -> tuple[Path | None, str | None]:
+        """Use a detached PR checkout so the user's active branch stays untouched."""
+        remote_ref = f"origin/{target_branch}"
+        remote_head = self.get_remote_branch_sha(target_branch)
+        if not remote_head:
+            return None, "PR #5 远端分支不存在，未派发 AGY"
+        registered = {str(Path(wt.get("worktree", "")).resolve()): wt for wt in self.get_registered_worktrees()}
+        if worktree_dir.exists():
+            wt = registered.get(str(worktree_dir))
+            if not wt or wt.get("branch") or wt.get("detached") != "true":
+                return None, "隔离目录已有未知文件或其它分支，未覆盖"
+            status = subprocess.run(
+                ["git", "status", "--porcelain"], cwd=worktree_dir, capture_output=True, text=True
+            )
+            if status.returncode != 0 or status.stdout.strip():
+                return None, "隔离工作区存在未提交改动，未覆盖"
+            current = self._get_worktree_head_sha(worktree_dir)
+            if current != remote_head:
+                ancestor = subprocess.run(
+                    ["git", "merge-base", "--is-ancestor", current or "", remote_head],
+                    cwd=self.repo_root, capture_output=True,
+                )
+                if ancestor.returncode != 0:
+                    return None, "隔离工作区与 PR #5 远端已分叉，未重置"
+                updated = subprocess.run(
+                    ["git", "switch", "--detach", remote_head],
+                    cwd=worktree_dir, capture_output=True, text=True,
+                )
+                if updated.returncode != 0:
+                    return None, "隔离工作区快进更新失败"
+        else:
+            added = subprocess.run(
+                ["git", "worktree", "add", "--detach", str(worktree_dir), remote_ref],
+                cwd=self.repo_root, capture_output=True, text=True,
+            )
+            if added.returncode != 0:
+                return None, "无法创建 PR #5 隔离工作区"
+
+        # Media and previews remain in ignored local paths; no tracked file is copied.
+        media = self.repo_root / "data" / "input" / "qianfu_ep18.mp4"
+        output = self.repo_root / "outputs" / "stage1"
+        if not media.is_file() or not output.is_dir():
+            return None, "本机视频或阶段 1 完整清单目录缺失，未派发 AGY"
+        for source, destination in (
+            (media, worktree_dir / "data" / "input" / media.name),
+            (output, worktree_dir / "outputs" / "stage1"),
+        ):
+            if not source.exists():
+                continue
+            if destination.is_symlink():
+                if destination.resolve() != source.resolve():
+                    return None, f"隔离工作区已有不同的本地资源链接: {destination.name}"
+            elif destination.exists():
+                return None, f"隔离工作区已有同名文件，未覆盖: {destination.name}"
+            else:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.symlink_to(source.resolve(), target_is_directory=source.is_dir())
+        return worktree_dir, None
 
     def _get_worktree_head_sha(self, worktree_dir: Path) -> str | None:
         try:

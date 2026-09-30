@@ -117,6 +117,39 @@ def test_r1_prepare_worktree_preserves_dirty_main_checkout(tmp_path: Path):
     assert dirty_file.read_text(encoding="utf-8") == "Uncommitted work in main\n"
 
 
+def test_authorized_pr5_uses_detached_checkout_and_local_ignored_media(tmp_path: Path):
+    repo = create_git_repo(tmp_path / "main_repo")
+    subprocess.run(["git", "switch", "-c", "feat/stage1-media-import"], cwd=repo, check=True, capture_output=True)
+    (repo / ".gitignore").write_text(".vmv-runner/\n.venv/\ndata/input/*\n!data/input/.gitkeep\noutputs/*\n!outputs/.gitkeep\n")
+    for directory in (repo / "data" / "input", repo / "outputs"):
+        directory.mkdir(parents=True)
+        (directory / ".gitkeep").touch()
+    subprocess.run(["git", "add", ".gitignore", "data/input/.gitkeep", "outputs/.gitkeep"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "media layout"], cwd=repo, check=True, capture_output=True)
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/feat/stage1-media-import", head], cwd=repo, check=True)
+    media = repo / "data" / "input" / "qianfu_ep18.mp4"
+    media.write_bytes(b"local only")
+    output = repo / "outputs" / "stage1"
+    output.mkdir()
+    (output / "scenes.json").write_text("[]")
+    user_file = repo / "unfinished.txt"
+    user_file.write_text("do not change")
+
+    runner = LocalTaskRunner(repo_root=repo)
+    task = TaskItem(id="stage1-preview-followup", revision=1,
+                    path="tasks/stage1-preview-followup.md", authorized=True)
+    worktree, error = runner.prepare_worktree_for_task(task, branch_name="feat/stage1-media-import")
+    assert error is None
+    assert worktree is not None
+    assert subprocess.check_output(["git", "branch", "--show-current"], cwd=worktree, text=True).strip() == ""
+    assert (worktree / "data" / "input" / media.name).is_symlink()
+    assert (worktree / "outputs" / "stage1").is_symlink()
+    assert (worktree / "outputs" / "stage1" / "scenes.json").read_text() == "[]"
+    assert user_file.read_text() == "do not change"
+    assert runner.prepare_worktree_for_task(task, branch_name="feat/stage1-media-import") == (worktree, None)
+
+
 def test_r1_prepare_worktree_rejects_occupied_branch(tmp_path: Path):
     """R1: If a branch is currently checked out in main or another worktree, reject with error."""
     repo = create_git_repo(tmp_path / "main_repo")
