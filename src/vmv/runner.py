@@ -882,6 +882,7 @@ class LocalTaskRunner:
             # 4. Resolve the one explicitly authorized PR task. All other
             # PR-branch tasks remain non-executable.
             pr_task_prompts: dict[str, str] = {}
+            retryable_pr_keys: set[str] = set()
             pr_tasks = self.discover_pr_branch_tasks()
             for pt in pr_tasks:
                 task_id = pt.get("task_id")
@@ -908,6 +909,8 @@ class LocalTaskRunner:
                 if resolve_err:
                     st.status = "ready" if retryable else "blocked"
                     st.last_error = resolve_err
+                    if retryable:
+                        retryable_pr_keys.add(task_key)
                     self.save_state(states)
                     level = "等待重试" if retryable else "阻塞"
                     log_msg(f"[PR 任务{level}] {task_key}: {resolve_err}")
@@ -945,6 +948,8 @@ class LocalTaskRunner:
             active_queue_keys = {f"{item.id}:r{item.revision}": item for item in queue}
             for task_key, st in states.items():
                 if st.status in ("ready", "running"):
+                    if task_key in retryable_pr_keys:
+                        continue
                     item = active_queue_keys.get(task_key)
                     if not item or not item.authorized:
                         st.status = "blocked"
