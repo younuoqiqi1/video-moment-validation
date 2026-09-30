@@ -2,7 +2,7 @@
 
 - **生成时间**：2026-09-30 (Asia/Shanghai)
 - **阶段状态**：`implementation_complete` / `awaiting_review`（功能实现及 R1–R3/R2a-1/R2a-2/R2b 修正已全部完成，待复核与验收）
-- **对应代码提交 (code_commit)**：`dcac835c5962c61305968fc483e723324db53b55`
+- **对应代码提交 (code_commit)**：`4906d5576fc3d82a3d515311c3d66998a73dd20d`
 - **执行环境**：Mac (Darwin arm64, Apple Silicon)
 
 ---
@@ -11,7 +11,7 @@
 
 | 命令 | 退出码 | 判定结果 | 说明 |
 | :--- | :---: | :---: | :--- |
-| `.venv/bin/python -m pytest tests/test_cli.py -v` | `0` | **全部通过 (18/18 passed)** | 包含 R1/R2、R2b 路径解析异常，以及针对 R2a-1 单文件原子替换与失败尽力回滚、R2a-2 预置旧文件严格保护与双故障/撤回失败边界保护的完整回归测试，详见 `reports/tests/stage0-test-summary.md` |
+| `.venv/bin/python -m pytest tests/test_cli.py -v` | `0` | **AGY报告：18/18 passed（原代码提交）** | AGY 报告的 18 项运行对应 `dcac835`；最新代码新增非法字符路径回归测试。Codex 在当前提交上独立验证该新路径错误被转为中文 OSError，但当前环境未安装 pytest，未重跑完整测试套件。详见测试摘要。 |
 | `.venv/bin/python -m vmv status --output environment.html` | `1` | **成功拦截 (R1 校验生效)** | 拒绝非 `.json` 扩展名，保护同名哨兵文件不被覆写 |
 | `.venv/bin/python -m vmv status --output outputs/stage0/environment.json` | `0` | **全部通过 (Passed 0)** | 准确探测并原子生成 JSON 与离线 HTML 环境核验报告，提示文字规范为“等待阶段验收” |
 
