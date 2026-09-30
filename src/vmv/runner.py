@@ -669,23 +669,45 @@ class LocalTaskRunner:
                 except Exception:
                     pass
 
-        # Check origin/main via git show if repo is git
-        if st.pr_number and st.head_sha:
+        # Check origin/main via git ls-tree if repo is git
+        if st.pr_number:
             git_dir = self.repo_root / ".git"
             if git_dir.exists():
                 try:
-                    target_name = f"pr-{st.pr_number}-{st.head_sha}.md"
-                    res = subprocess.run(
-                        ["git", "show", f"origin/main:reviews/{target_name}"],
+                    ls_res = subprocess.run(
+                        ["git", "ls-tree", "--name-only", "origin/main", "reviews/"],
                         cwd=str(self.repo_root),
                         capture_output=True,
                         text=True,
                     )
-                    if res.returncode == 0 and res.stdout.strip():
-                        reviews_dir.mkdir(parents=True, exist_ok=True)
-                        local_copy = reviews_dir / target_name
-                        local_copy.write_text(res.stdout, encoding="utf-8")
-                        return local_copy
+                    if ls_res.returncode == 0:
+                        matching_files = [
+                            line.strip()
+                            for line in ls_res.stdout.splitlines()
+                            if line.strip().startswith(f"reviews/pr-{st.pr_number}-")
+                        ]
+                        target_file = None
+                        if st.head_sha:
+                            for mf in matching_files:
+                                if st.head_sha in mf:
+                                    target_file = mf
+                                    break
+                        if not target_file and matching_files:
+                            target_file = matching_files[-1]
+
+                        if target_file:
+                            res = subprocess.run(
+                                ["git", "show", f"origin/main:{target_file}"],
+                                cwd=str(self.repo_root),
+                                capture_output=True,
+                                text=True,
+                            )
+                            if res.returncode == 0 and res.stdout.strip():
+                                reviews_dir.mkdir(parents=True, exist_ok=True)
+                                fname = Path(target_file).name
+                                local_copy = reviews_dir / fname
+                                local_copy.write_text(res.stdout, encoding="utf-8")
+                                return local_copy
                 except Exception:
                     pass
 

@@ -23,8 +23,9 @@ def generate_plist_xml(
     interval_sec: int = 120,
 ) -> str:
     """Generate launchd XML string with proper escaping and absolute paths."""
-    resolved_python = html.escape(str(Path(python_bin).resolve()))
+    resolved_python = html.escape(str(Path(python_bin).absolute()))
     resolved_repo = html.escape(str(repo_root.resolve()))
+    src_dir = html.escape(str((repo_root / "src").resolve()))
     log_file = html.escape(str((repo_root / ".vmv-runner" / "runner.log").resolve()))
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -45,6 +46,11 @@ def generate_plist_xml(
     </array>
     <key>WorkingDirectory</key>
     <string>{resolved_repo}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>{src_dir}</string>
+    </dict>
     <key>StartInterval</key>
     <integer>{interval_sec}</integer>
     <key>RunAtLoad</key>
@@ -67,7 +73,12 @@ def install_service(
     Install and load the user-level launchd agent.
     Returns (success, message).
     """
-    py_exec = python_bin or sys.executable
+    if python_bin:
+        py_exec = python_bin
+    elif (repo_root / ".venv" / "bin" / "python").exists():
+        py_exec = str(repo_root / ".venv" / "bin" / "python")
+    else:
+        py_exec = sys.executable
     plist_path = get_launch_agent_plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
 
