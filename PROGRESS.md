@@ -32,7 +32,7 @@
 - [x] 确认 Mac 上 AGY 能实际完成一个最小任务（完成 L0 CLI 与测试套件开发，单元测试 6/6 通过）
 - [x] 安装并配置 FFmpeg、ffprobe 依赖（已成功部署到 PATH）
 - [x] 已关联并推送指定 GitHub 仓库，Codex 已验证读取
-- [x] 实现并验证本地 AGY 自动接任务与 launchd 轮询服务（代码与测试 20/20 通过，已提交 PR 待审查）
+- [x] 实现并验证本地 AGY 自动接任务与 launchd 轮询服务（完成 P1 远端拉取/worktree隔离/request_changes派发加固，全量测试 26/26 通过，已提交 PR 待审查）
 - [ ] 确认 GPT 自动续跑能力（未接通，不承诺自动唤醒）
 - [ ] 将本地执行变更同步到 Notion（本轮仅更新仓库看板）
 
@@ -57,8 +57,8 @@
 ## 最新审查与下一步
 
 - PR #1 素材下载：Codex 审查结论 `pass_with_notes`，等待用户阶段验收。
-- PR #2 阶段0修正：R1–R3 及 R2a/R2b 全部完成，已推送更新并保持 `awaiting_review`，等待 Codex 复核。
-- PR #3 本地自动接任务：实现白名单、跨进程锁、既有交付识别、launchd 用户级定时轮询与 CLI 子命令，20 项测试全通过，等待 Codex 审查。
+- PR #2 阶段0修正：R1–R3 及 R2a-1/R2a-2/R2b 全部完成，已推送更新（提交 `3cb9f67`）并保持 `awaiting_review`，等待 Codex 复核。
+- PR #3 本地自动接任务：P1-1~P1-3 深度修正完成（实现远端 origin/main 安全拉取、独立 worktree 隔离保护主工作区、request_changes 自动派发与 PR/SHA 绑定、interrupted 本轮中止与真实 PID），全量测试 26/26 全部通过，保持 `awaiting_review` 等待 Codex 复核。
 - 保持严格门禁：不自动合并任何 PR，不越过用户授权推进视频阶段 1。
 
 ## 当前优先级：验证能力优先

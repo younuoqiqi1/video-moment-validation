@@ -235,10 +235,11 @@ def test_runner_request_changes_review_does_not_mark_done(tmp_path: Path):
     }
     runner.save_state(states)
 
-    exit_code = runner.run_once()
-    assert exit_code == 0
-    loaded = runner.load_state()
-    assert loaded["my-task:r1"].status == "awaiting_review"
+    with patch.object(runner, "execute_cli_task", return_value=(0, "mocked", 1234)):
+        exit_code = runner.run_once()
+        assert exit_code == 0
+        loaded = runner.load_state()
+        assert loaded["my-task:r1"].status == "awaiting_review"
 
 
 def test_runner_done_task_not_reexecuted(tmp_path: Path):
@@ -282,19 +283,24 @@ def test_runner_shell_meta_passed_as_literal_argv(tmp_path: Path):
     meta_prompt = 'echo "hello" && rm -rf / ; `whoami` $FOO'
 
     with patch("shutil.which", return_value="/usr/local/bin/agy"):
-        with patch("subprocess.run") as mock_sub:
-            mock_sub.return_value = MagicMock(returncode=0, stdout="success", stderr="")
-            code, out = runner.execute_cli_task(task_item, meta_prompt)
+        with patch("subprocess.Popen") as mock_popen:
+            mock_proc = MagicMock()
+            mock_proc.pid = 9999
+            mock_proc.returncode = 0
+            mock_proc.communicate.return_value = ("success", "")
+            mock_popen.return_value = mock_proc
+
+            res = runner.execute_cli_task(task_item, meta_prompt)
+            code, out = res[0], res[1]
             assert code == 0
-            mock_sub.assert_called_once()
-            called_cmd = mock_sub.call_args[0][0]
+            mock_popen.assert_called_once()
+            called_cmd = mock_popen.call_args[0][0]
             assert isinstance(called_cmd, list)
             assert called_cmd[0] == "/usr/local/bin/agy"
             assert "--print" in called_cmd
             prompt_idx = called_cmd.index("--print") + 1
             assert called_cmd[prompt_idx] == meta_prompt
-            # shell kwarg must not be True
-            assert mock_sub.call_args[1].get("shell") is not True
+            assert mock_popen.call_args[1].get("shell") is not True
 
 
 def test_runner_sync_existing_deliveries(tmp_path: Path):
@@ -307,7 +313,6 @@ def test_runner_sync_existing_deliveries(tmp_path: Path):
     runner = LocalTaskRunner(repo_root=tmp_path, runner_dir=tmp_path / ".vmv-runner")
     states = {}
     with patch("subprocess.run") as mock_git:
-        # Mock git rev-parse for origin/task/stage0-review-fix
         mock_git.return_value = MagicMock(returncode=0, stdout="stage0_sha_999\n", stderr="")
         runner.sync_existing_deliveries(states)
 
@@ -319,4 +324,174 @@ def test_runner_sync_existing_deliveries(tmp_path: Path):
         assert states["stage0-fixes:r1"].status == "awaiting_review"
         assert states["stage0-fixes:r1"].head_sha == "stage0_sha_999"
         assert states["stage0-fixes:r1"].pr_number == 2
+
+
+def test_runner_fetch_remote_unreachable_preserves_state(tmp_path: Path):
+    """P1-1: Verify network error or unreachable origin preserves state without crashing or wiping."""
+    runner = LocalTaskRunner(repo_root=tmp_path, runner_dir=tmp_path / ".vmv-runner")
+    states = {
+        "existing-task:r1": TaskState(
+            task_id="existing-task",
+            revision=1,
+            status="awaiting_review",
+            head_sha="head123",
+        )
+    }
+    runner.save_state(states)
+
+    with patch.object(runner, "fetch_remote_main", return_value=(False, "Connection timed out")):
+        exit_code = runner.run_once()
+        assert exit_code == 0
+        loaded = runner.load_state()
+        assert "existing-task:r1" in loaded
+        assert loaded["existing-task:r1"].status == "awaiting_review"
+
+
+def test_runner_loads_queue_from_origin_main(tmp_path: Path):
+    """P1-1: Verify queue is read from origin/main:tasks/queue.json when available."""
+    runner = LocalTaskRunner(repo_root=tmp_path, runner_dir=tmp_path / ".vmv-runner")
+    remote_queue_content = json.dumps({
+        "version": 1,
+        "tasks": [
+            {"id": "remote-auth-task", "revision": 1, "path": "tasks/remote.md", "authorized": True}
+        ]
+    })
+
+    def mock_sub_run(cmd, *args, **kwargs):
+        if "git" in cmd and "origin/main:tasks/queue.json" in cmd:
+            return MagicMock(returncode=0, stdout=remote_queue_content, stderr="")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch("subprocess.run", side_effect=mock_sub_run):
+        tasks = runner.load_queue_tasks()
+        assert len(tasks) == 1
+        assert tasks[0].id == "remote-auth-task"
+        assert tasks[0].authorized is True
+
+
+def test_runner_request_changes_dispatches_fix_and_updates_head(tmp_path: Path):
+    """P1-2: Verify request_changes review triggers fix dispatch, increments attempt, and updates head_sha."""
+    reviews_dir = tmp_path / "reviews"
+    reviews_dir.mkdir(parents=True)
+    review_file = reviews_dir / "pr-2-old_sha.md"
+    review_file.write_text("结论：request_changes\n必须修改两处错误", encoding="utf-8")
+
+    tasks_dir = tmp_path / "tasks"
+    tasks_dir.mkdir(parents=True)
+    queue_file = tasks_dir / "queue.json"
+    queue_file.write_text(
+        json.dumps({
+            "version": 1,
+            "tasks": [
+                {"id": "fixable-task", "revision": 1, "path": "tasks/f.md", "authorized": True}
+            ]
+        }),
+        encoding="utf-8"
+    )
+
+    runner = LocalTaskRunner(repo_root=tmp_path, runner_dir=tmp_path / ".vmv-runner")
+    states = {
+        "fixable-task:r1": TaskState(
+            task_id="fixable-task",
+            revision=1,
+            status="awaiting_review",
+            pr_number=2,
+            head_sha="old_sha",
+            attempt=1,
+        )
+    }
+    runner.save_state(states)
+
+    with patch.object(runner, "execute_cli_task", return_value=(0, "Fix applied successfully", 5555)) as mock_exec:
+        with patch.object(runner, "_get_worktree_head_sha", return_value="new_sha_777"):
+            exit_code = runner.run_once()
+            assert exit_code == 0
+            mock_exec.assert_called_once()
+            call_prompt = mock_exec.call_args[0][1]
+            assert "必须修改两处错误" in call_prompt
+
+            loaded = runner.load_state()
+            st = loaded["fixable-task:r1"]
+            assert st.status == "awaiting_review"
+            assert st.head_sha == "new_sha_777"
+            assert st.attempt == 2
+
+
+def test_runner_same_commit_request_changes_not_dispatched_twice(tmp_path: Path):
+    """P1-2: Verify request_changes for the same commit is only dispatched once."""
+    reviews_dir = tmp_path / "reviews"
+    reviews_dir.mkdir(parents=True)
+    review_file = reviews_dir / "pr-2-same_sha.md"
+    review_file.write_text("结论：request_changes\n修改意见", encoding="utf-8")
+
+    tasks_dir = tmp_path / "tasks"
+    tasks_dir.mkdir(parents=True)
+    queue_file = tasks_dir / "queue.json"
+    queue_file.write_text(
+        json.dumps({
+            "version": 1,
+            "tasks": [
+                {"id": "my-task", "revision": 1, "path": "tasks/t.md", "authorized": True}
+            ]
+        }),
+        encoding="utf-8"
+    )
+
+    runner = LocalTaskRunner(repo_root=tmp_path, runner_dir=tmp_path / ".vmv-runner")
+    states = {
+        "my-task:r1": TaskState(
+            task_id="my-task",
+            revision=1,
+            status="awaiting_review",
+            pr_number=2,
+            head_sha="same_sha",
+            last_error="dispatched:same_sha",  # Marked as already dispatched for this commit
+        )
+    }
+    runner.save_state(states)
+
+    with patch.object(runner, "execute_cli_task") as mock_exec:
+        exit_code = runner.run_once()
+        assert exit_code == 0
+        mock_exec.assert_not_called()  # Must NOT dispatch again for same commit!
+
+
+def test_runner_interrupted_stops_cycle_without_rerun(tmp_path: Path):
+    """P1-3: Verify crashed PID marks task as interrupted and halts the current cycle without re-running."""
+    tasks_dir = tmp_path / "tasks"
+    tasks_dir.mkdir(parents=True)
+    task_file = tasks_dir / "ready_task.md"
+    task_file.write_text("Ready to run", encoding="utf-8")
+
+    queue_file = tasks_dir / "queue.json"
+    queue_file.write_text(
+        json.dumps({
+            "version": 1,
+            "tasks": [
+                {"id": "ready-task", "revision": 1, "path": "tasks/ready_task.md", "authorized": True}
+            ]
+        }),
+        encoding="utf-8"
+    )
+
+    runner = LocalTaskRunner(repo_root=tmp_path, runner_dir=tmp_path / ".vmv-runner")
+    states = {
+        "crashed-task:r1": TaskState(
+            task_id="crashed-task",
+            revision=1,
+            status="running",
+            pid=99999999,
+        )
+    }
+    runner.save_state(states)
+
+    with patch.object(runner, "check_process_alive", return_value=False):
+        with patch.object(runner, "execute_cli_task") as mock_exec:
+            exit_code = runner.run_once()
+            assert exit_code == 0
+            mock_exec.assert_not_called()  # Ready task must NOT be executed in this interrupted cycle!
+
+            loaded = runner.load_state()
+            assert loaded["crashed-task:r1"].status == "interrupted"
+
 

@@ -66,3 +66,20 @@ def test_get_service_status(tmp_path: Path):
             assert status["running"] is True
             assert status["pid"] == 12345
             assert status["last_exit_code"] == 0
+
+
+def test_stop_service_fails_when_launchctl_fails(tmp_path: Path):
+    """Verify stop_service retains plist and returns False when launchctl unload fails."""
+    fake_plist = tmp_path / "LaunchAgents" / f"{SERVICE_LABEL}.plist"
+    fake_plist.parent.mkdir(parents=True, exist_ok=True)
+    fake_plist.write_text("dummy", encoding="utf-8")
+
+    with patch("vmv.runner_service.get_launch_agent_plist_path", return_value=fake_plist):
+        with patch("subprocess.run") as mock_sub:
+            mock_sub.return_value = MagicMock(returncode=1, stdout="", stderr="Permission denied or unknown error")
+
+            success, msg = stop_service()
+            assert success is False
+            assert "launchctl unload 失败" in msg
+            assert fake_plist.exists()  # Plist must be retained on failure!
+

@@ -111,10 +111,15 @@ def stop_service() -> tuple[bool, str]:
             capture_output=True,
             text=True,
         )
+        if res.returncode != 0:
+            err = res.stderr.strip() or res.stdout.strip()
+            if "Could not find" not in err and "No such process" not in err and err != "":
+                return False, f"停止后台服务失败: launchctl unload 失败: {err}"
+
         try:
             plist_path.unlink()
-        except OSError:
-            pass
+        except OSError as exc:
+            return False, f"删除配置文件失败: {exc}"
 
         return True, f"已成功停止并卸载后台服务: {SERVICE_LABEL}"
     except Exception as exc:
