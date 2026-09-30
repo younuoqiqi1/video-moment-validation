@@ -169,6 +169,30 @@ def run_worker(args: argparse.Namespace) -> int:
     return 0 if (cli_exit_code == 0 and token_match and app_closed) else 1
 
 
+
+def cleanup_launchd_service(plist_path: Path) -> None:
+    """Unload the temporary launchd job before removing its recovery plist.
+
+    If launchctl cannot confirm the unload, keep the plist so the job can still
+    be inspected or unloaded manually, and fail the verification run.
+    """
+    result = subprocess.run(
+        ["launchctl", "unload", "-w", str(plist_path)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+        raise RuntimeError(f"launchctl 卸载失败；保留 plist 供排查: {detail}")
+
+    try:
+        plist_path.unlink(missing_ok=True)
+    except OSError as exc:
+        raise RuntimeError(f"launchd 已卸载，但无法删除 plist {plist_path}: {exc}") from exc
+
+    if plist_path.exists():
+        raise RuntimeError(f"launchd 已卸载，但 plist 仍存在: {plist_path}")
+
 def run_controller(args: argparse.Namespace) -> int:
     """Controller entry point, sets up environment and launchd service, monitors and cleans up."""
     print("==================================================")
@@ -273,15 +297,15 @@ def run_controller(args: argparse.Namespace) -> int:
         return 0 if all_ok else 1
 
     finally:
-        # Strict lifecycle cleanup: unload launchd service and remove plist
+        # Fail closed: do not delete the recovery plist or claim success if
+        # launchctl cannot unload the job.
         print(f"[+] 正在清理本次离线验证临时服务: {label}...")
-        subprocess.run(["launchctl", "unload", "-w", str(plist_path)], capture_output=True)
-        if plist_path.exists():
-            try:
-                plist_path.unlink()
-            except Exception:
-                pass
-        print("[+] 临时服务与 plist 清理完成。")
+        try:
+            cleanup_launchd_service(plist_path)
+        except RuntimeError as exc:
+            print(f"[-] 临时服务清理失败: {exc}", file=sys.stderr)
+            raise
+        print("[+] 临时服务已卸载，plist 已删除。")
 
 
 def main() -> int:
