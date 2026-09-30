@@ -32,7 +32,7 @@
 - [x] 确认 Mac 上 AGY 能实际完成一个最小任务（完成 L0 CLI 与测试套件开发，单元测试 6/6 通过）
 - [x] 安装并配置 FFmpeg、ffprobe 依赖（已成功部署到 PATH）
 - [x] 已关联并推送指定 GitHub 仓库，Codex 已验证读取
-- [ ] 实现并验证本地 AGY 自动接任务与 launchd 轮询服务（旧版只读探针曾在 Mac 运行；新版限定 PR #5 任务的代码在 Codex Linux 环境 45/45 测试通过，尚未在用户 Mac 验证服务更新与 AGY 实际启动；见 reports/local-runner-probe.md，PR #3 等待复核）
+- [ ] 实现并验证本地 AGY 自动接任务与 launchd 轮询服务（旧版只读探针曾在 Mac 运行；新版限定 PR #5 任务及独立代码目录启动入口在 Codex Linux 环境 49/49 测试通过，尚未在用户 Mac 安装或验证 AGY 实际启动；一次操作见 docs/runner-activation.md）
 - [ ] 确认 GPT 自动续跑能力（未接通，不承诺自动唤醒）
 - [ ] 将本地执行变更同步到 Notion（本轮仅更新仓库看板）
 
@@ -58,7 +58,7 @@
 
 - PR #1 素材下载：Codex 审查结论 `pass_with_notes`，等待用户阶段验收。
 - PR #2 阶段0修正：Codex 审查结论 `pass_with_notes`（提交 `dadcbb5`），代码复核通过，等待用户最终阶段验收。
-- PR #3 本地自动接任务：已修复暂时读取 GitHub 失败后被误判为撤销授权的实际测试故障；在 Codex Linux 环境独立复核 45/45 通过。真实 PR #5 的任务文件版本与授权限定值一致。Mac 后台新版未验证，保持 `awaiting_review`。
+- PR #3 本地自动接任务：增加独立代码目录的启动入口与每轮更新，明确拉取所需远端分支，远端队列缺失则停止。Codex Linux 环境独立复核 49/49 通过；Mac 后台新版未安装实测，保持 `awaiting_review`。
 - 保持阶段门禁：限定在用户已授权的 PR #5 阶段 1 补充任务，不自动合并 PR，不进入阶段 2。
 
 ## 当前优先级：验证能力优先

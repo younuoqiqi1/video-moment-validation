@@ -176,6 +176,30 @@ def test_r2_fetch_failure_halts_and_preserves_ready_task(tmp_path: Path):
             assert loaded["ready-task:r1"].status == "ready"
 
 
+def test_remote_queue_missing_never_uses_locally_authorized_copy(tmp_path: Path):
+    repo = create_git_repo(tmp_path / "main_repo")
+    local_queue = repo / "tasks" / "queue.json"
+    local_queue.parent.mkdir()
+    local_queue.write_text('{"tasks":[{"id":"stale","path":"tasks/stale.md","authorized":true}]}')
+    runner = LocalTaskRunner(repo_root=repo)
+    tasks, error = runner.load_queue_tasks("HEAD")
+    assert tasks is None
+    assert "tasks/queue.json" in error
+
+
+def test_corrupt_persisted_state_never_dispatches_again(tmp_path: Path):
+    repo = create_git_repo(tmp_path / "main_repo")
+    runner = LocalTaskRunner(repo_root=repo)
+    runner.state_file.write_text('{"tasks":', encoding="utf-8")
+    with patch.object(runner, "fetch_remote_main", return_value=(True, "")), \
+         patch.object(runner, "get_origin_main_sha", return_value="f" * 40), \
+         patch.object(runner, "load_queue_tasks", return_value=([], None)), \
+         patch.object(runner, "execute_cli_task") as execute:
+        assert runner.run_once() == 1
+        execute.assert_not_called()
+    assert runner.state_file.read_text(encoding="utf-8") == '{"tasks":'
+
+
 def test_r2_remote_revocation_blocks_ready_task(tmp_path: Path):
     """R2: If a task was ready locally but remote queue revoked authorization, mark blocked."""
     repo = create_git_repo(tmp_path / "main_repo")
@@ -682,5 +706,3 @@ def test_resolver_accepts_only_pinned_task_after_pr_and_blob_checks(tmp_path: Pa
     assert "阶段 1 镜头清单核对补充" in (prompt or "")
     assert error is None
     assert can_retry is False
-
-

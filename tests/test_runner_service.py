@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from unittest.mock import patch, MagicMock
+import plistlib
 
 import pytest
 
@@ -28,6 +29,18 @@ def test_generate_plist_xml_chinese_and_spaces(tmp_path: Path):
     assert "测试 空间 目录" in xml
     assert "视频 验证 项目" in xml
     assert "runner.log" in xml
+
+
+def test_dedicated_code_checkout_keeps_repo_path_separate(tmp_path: Path):
+    repo = tmp_path / "原项目"
+    code = repo / ".vmv-runner" / "code"
+    plist = plistlib.loads(generate_plist_xml("/bin/python3", repo, code_root=code).encode())
+    assert plist["ProgramArguments"] == [
+        "/bin/python3", "-m", "vmv.runner_bootstrap",
+        "--repo", str(repo), "--code-root", str(code),
+    ]
+    assert plist["EnvironmentVariables"]["PYTHONPATH"] == str(code / "src")
+    assert plist["StartInterval"] == 120
 
 
 def test_install_and_stop_service_flow(tmp_path: Path):
@@ -82,4 +95,3 @@ def test_stop_service_fails_when_launchctl_fails(tmp_path: Path):
             assert success is False
             assert "launchctl unload 失败" in msg
             assert fake_plist.exists()  # Plist must be retained on failure!
-

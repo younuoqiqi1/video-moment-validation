@@ -21,12 +21,20 @@ def generate_plist_xml(
     python_bin: str,
     repo_root: Path,
     interval_sec: int = 120,
+    code_root: Path | None = None,
 ) -> str:
     """Generate launchd XML string with proper escaping and absolute paths."""
     resolved_python = html.escape(str(Path(python_bin).absolute()))
     resolved_repo = html.escape(str(repo_root.resolve()))
-    src_dir = html.escape(str((repo_root / "src").resolve()))
+    src_dir = html.escape(str(((code_root or repo_root) / "src").resolve()))
     log_file = html.escape(str((repo_root / ".vmv-runner" / "runner.log").resolve()))
+    action_args = ["--repo", resolved_repo]
+    if code_root:
+        action_args += ["--code-root", html.escape(str(code_root.resolve()))]
+    else:
+        action_args = ["runner", "once"] + action_args
+    action_xml = "\n".join(f"        <string>{arg}</string>" for arg in action_args)
+    module = "vmv.runner_bootstrap" if code_root else "vmv"
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -38,11 +46,8 @@ def generate_plist_xml(
     <array>
         <string>{resolved_python}</string>
         <string>-m</string>
-        <string>vmv</string>
-        <string>runner</string>
-        <string>once</string>
-        <string>--repo</string>
-        <string>{resolved_repo}</string>
+        <string>{module}</string>
+{action_xml}
     </array>
     <key>WorkingDirectory</key>
     <string>{resolved_repo}</string>
@@ -68,6 +73,7 @@ def install_service(
     repo_root: Path,
     python_bin: str | None = None,
     interval_sec: int = 120,
+    code_root: Path | None = None,
 ) -> tuple[bool, str]:
     """
     Install and load the user-level launchd agent.
@@ -85,7 +91,7 @@ def install_service(
     # Ensure log directory exists
     (repo_root / ".vmv-runner").mkdir(parents=True, exist_ok=True)
 
-    xml_content = generate_plist_xml(py_exec, repo_root, interval_sec=interval_sec)
+    xml_content = generate_plist_xml(py_exec, repo_root, interval_sec=interval_sec, code_root=code_root)
 
     try:
         # If already loaded, unload first

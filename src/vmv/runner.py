@@ -146,11 +146,13 @@ class LocalTaskRunner:
         try:
             with open(self.state_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            if not isinstance(data, dict) or not isinstance(data.get("tasks"), dict):
+                raise ValueError("任务状态结构无效")
             return {
                 k: TaskState.from_dict(v) for k, v in data.get("tasks", {}).items()
             }
-        except Exception:
-            return {}
+        except (OSError, ValueError, TypeError) as exc:
+            raise RuntimeError("任务状态文件无法读取；保留原文件并停止派发") from exc
 
     def save_state(self, states: dict[str, TaskState]) -> None:
         """Atomically persist task states to state.json."""
@@ -176,16 +178,19 @@ class LocalTaskRunner:
             return False
 
     def fetch_remote_main(self) -> tuple[bool, str]:
-        """Safely fetch origin branches inside lock. Returns (success, err_msg)."""
+        """Fetch exactly the remote authority and the one authorized PR branch."""
         if not shutil.which("git"):
             return False, "系统 PATH 中未找到 git 工具"
         git_dir = self.repo_root / ".git"
         if not git_dir.exists():
             return False, "根目录不是 Git 仓库"
         try:
-            # Fetch origin to sync both main and PR tracking branches
             res = subprocess.run(
-                ["git", "fetch", "origin"],
+                [
+                    "git", "fetch", "origin",
+                    "+refs/heads/main:refs/remotes/origin/main",
+                    "+refs/heads/feat/stage1-media-import:refs/remotes/origin/feat/stage1-media-import",
+                ],
                 cwd=str(self.repo_root),
                 capture_output=True,
                 text=True,
@@ -219,7 +224,7 @@ class LocalTaskRunner:
         """
         Load queue strictly from remote origin/main snapshot.
         Returns (tasks_list, error_diagnostic).
-        If missing from remote main, falls back to locally tracked tasks/queue.json if available.
+        A missing remote queue is an error, never local authorization.
         """
         git_dir = self.repo_root / ".git"
         if not git_dir.exists():
@@ -250,12 +255,6 @@ class LocalTaskRunner:
                     for t in raw_tasks
                 ]
                 return tasks, None
-
-            # Fallback to local tracked queue if remote main does not yet contain tasks/queue.json
-            if self.queue_file.exists():
-                local_tasks = self.load_queue()
-                if local_tasks:
-                    return local_tasks, None
 
             err = res.stderr.strip() or "tasks/queue.json 文件不存在"
             return None, f"无法从 {sha[:7] if len(sha) >= 7 else sha} 读取 tasks/queue.json: {err}"
@@ -859,7 +858,11 @@ class LocalTaskRunner:
                 log_msg(f"远程队列加载失败: {queue_err}，终止本轮执行。")
                 return 1
 
-            states = self.load_state()
+            try:
+                states = self.load_state()
+            except RuntimeError as exc:
+                log_msg(str(exc))
+                return 1
 
             # 2. Check for interrupted processes
             had_interrupted = False
