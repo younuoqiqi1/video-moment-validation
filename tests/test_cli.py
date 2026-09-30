@@ -390,3 +390,116 @@ def test_status_cli_preexisting_both_restored_on_json_failure_r2a(tmp_path: Path
             assert target_json.read_text(encoding="utf-8") == "OLD_JSON_SENTINEL"
             assert html_target.read_text(encoding="utf-8") == "OLD_HTML_SENTINEL"
 
+
+def test_status_cli_dual_fault_json_publish_and_html_restore_failed_r2a(tmp_path: Path, capsys):
+    """
+    R2a-1/R2a-2 regression: JSON publish fails + HTML rollback restore fails.
+    Asserts:
+    1. Non-zero exit code.
+    2. Old HTML backup strictly preserved on disk and bytes intact.
+    3. Errors contain both failure reasons (JSON publish denied + HTML restore denied)
+       and the recovery path to the preserved backup.
+    4. Old JSON content preserved completely.
+    """
+    def mock_probe(cmd: list[str], timeout_sec: float = 5.0):
+        tool = cmd[0]
+        return True, f"{tool} 1.0.0", None
+
+    target_json = tmp_path / "dual_fault.json"
+    html_target = tmp_path / "dual_fault.html"
+
+    old_json_bytes = "OLD_JSON_SENTINEL_BYTES_PRESERVED"
+    old_html_bytes = "OLD_HTML_SENTINEL_BYTES_PRESERVED"
+
+    target_json.write_text(old_json_bytes, encoding="utf-8")
+    html_target.write_text(old_html_bytes, encoding="utf-8")
+
+    real_replace = os.replace
+
+    def fake_replace(src, dst):
+        if str(dst).endswith(".json"):
+            raise PermissionError("模拟 JSON 发布权限被拒绝")
+        if ".bak_html_" in str(src) or str(src).endswith(".bak"):
+            raise PermissionError("模拟 HTML 恢复权限被拒绝")
+        return real_replace(src, dst)
+
+    with patch("vmv.report.probe_tool_version", side_effect=mock_probe):
+        with patch("os.replace", side_effect=fake_replace):
+            # 1. Test run_status_stage directly
+            res = run_status_stage(target_json)
+            assert res.status == "failed"
+            assert res.artifacts == []
+            assert res.details.get("overall_status") == "failed"
+            assert any("模拟 JSON 发布权限被拒绝" in err for err in res.errors)
+            assert any("模拟 HTML 恢复权限被拒绝" in err for err in res.errors)
+            preserved = res.details.get("preserved_backups", [])
+            assert len(preserved) == 1
+            bak_path = Path(preserved[0])
+            assert bak_path.exists()
+            assert bak_path.read_text(encoding="utf-8") == old_html_bytes
+            assert target_json.read_text(encoding="utf-8") == old_json_bytes
+
+            # 2. Test CLI main() with an isolated output path
+            cli_json = tmp_path / "cli_dual_fault.json"
+            cli_html = tmp_path / "cli_dual_fault.html"
+            cli_json.write_text(old_json_bytes, encoding="utf-8")
+            cli_html.write_text(old_html_bytes, encoding="utf-8")
+
+            exit_code = main(["status", "--output", str(cli_json)])
+            assert exit_code != 0
+
+            captured = capsys.readouterr()
+            assert "模拟 JSON 发布权限被拒绝" in captured.out
+            assert "模拟 HTML 恢复权限被拒绝" in captured.out
+            assert ".bak_html_" in captured.out
+            assert cli_json.read_text(encoding="utf-8") == old_json_bytes
+
+
+def test_status_cli_html_unlink_failed_on_rollback_r2a(tmp_path: Path, capsys):
+    """
+    R2a-1 regression: When newly published HTML fails to unlink during rollback on JSON failure,
+    assert error clearly records residual path and unlink error, and does not silently swallow it.
+    """
+    def mock_probe(cmd: list[str], timeout_sec: float = 5.0):
+        tool = cmd[0]
+        return True, f"{tool} 1.0.0", None
+
+    target_json = tmp_path / "unlink_fail.json"
+    html_target = tmp_path / "unlink_fail.html"
+
+    real_replace = os.replace
+    real_unlink = Path.unlink
+
+    def fake_replace(src, dst):
+        if str(dst).endswith(".json"):
+            raise PermissionError("模拟 JSON 发布权限被拒绝")
+        return real_replace(src, dst)
+
+    def fake_unlink(self, *args, **kwargs):
+        if str(self).endswith(".html"):
+            raise PermissionError("模拟 HTML 撤回删除权限被拒绝")
+        return real_unlink(self, *args, **kwargs)
+
+    with patch("vmv.report.probe_tool_version", side_effect=mock_probe):
+        with patch("os.replace", side_effect=fake_replace):
+            with patch.object(Path, "unlink", fake_unlink):
+                # 1. Test run_status_stage directly
+                res = run_status_stage(target_json)
+                assert res.status == "failed"
+                assert res.artifacts == []
+                assert any("模拟 HTML 撤回删除权限被拒绝" in err for err in res.errors)
+                assert str(html_target) in res.details.get("dangling_artifacts", [])
+
+                # 2. Test CLI main() with isolated path
+                cli_json = tmp_path / "cli_unlink_fail.json"
+                cli_html = tmp_path / "cli_unlink_fail.html"
+
+                exit_code = main(["status", "--output", str(cli_json)])
+                assert exit_code != 0
+
+                captured = capsys.readouterr()
+                assert "模拟 JSON 发布权限被拒绝" in captured.out
+                assert "模拟 HTML 撤回删除权限被拒绝" in captured.out
+                assert str(cli_html) in captured.out
+
+
