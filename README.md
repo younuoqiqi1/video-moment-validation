@@ -11,11 +11,11 @@ Notion 同步看板：[老周聊《潜伏》技术验证｜进度与阶段验收
 ## 当前状态
 
 - 执行方式已改为用户 Mac 本地运行，AGY 编码，Codex 监督与审查
-- 当前只有项目文档与 Git 历史，尚未实现检索、配音、成片功能
-- 从 [`LOCAL_START.md`](LOCAL_START.md) 开始；本地执行修订优先于旧计划中的云端安排
-- 等待核验 Mac 上的 AGY、Python、FFmpeg 与登录状态
-- 已有 Git 历史，但尚未关联或推送 GitHub 仓库
-- 等待 20–30 分钟测试视频与确认后的口播稿
+- 已建立独立的本地 Git 仓库，并在项目内配置 Python 3.12 虚拟环境
+- 完成阶段 0（L0）：CLI 模块 `vmv status` 与离线 HTML/JSON 环境报告生成
+- 自动化测试（`pytest tests/test_cli.py`）6/6 全部通过
+- 当前环境实测：Python 3.12、Git、AGY 就绪，**FFmpeg / ffprobe 尚未安装（为当前核心阻塞项）**
+- 等待安装 FFmpeg、20–30 分钟测试视频与确认后的口播稿
 
 镜头理解先由当前 GPT 会话读取本地导出的抽帧与字幕包完成，再将结果导回本地程序；程序不使用 Plus 额度调用 GPT API。全流程无需云端计算服务器，但 AGY、阿里云 TTS 与 GitHub 仍需要联网。
 
