@@ -14,6 +14,17 @@ from pathlib import Path
 from typing import Any
 
 
+# Only this exact task was explicitly authorized for automatic execution.
+# Pin the task blob so edits to the PR task file cannot silently broaden scope.
+AUTHORIZED_PR_TASK = {
+    "task_id": "stage1-preview-followup",
+    "pr_number": 5,
+    "branch": "feat/stage1-media-import",
+    "path": "tasks/stage1-preview-followup.md",
+    "blob_sha": "d24aecccdbde1fce7dc28801936dcaeb2bbb564e",
+}
+
+
 def log_msg(msg: str) -> None:
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{now_str}] {msg}")
@@ -320,6 +331,117 @@ class LocalTaskRunner:
         except Exception as exc:
             return None, f"读取任务提示词异常: {exc}"
 
+    def resolve_authorized_pr_task(
+        self, discovery: dict[str, Any]
+    ) -> tuple[TaskItem | None, str | None, str | None]:
+        """Resolve only the single PR task whose exact scope was authorized."""
+        expected = AUTHORIZED_PR_TASK
+        identity = (
+            discovery.get("task_id"),
+            discovery.get("pr_number"),
+            discovery.get("branch"),
+            discovery.get("task_path"),
+        )
+        allowed = (
+            expected["task_id"],
+            expected["pr_number"],
+            expected["branch"],
+            expected["path"],
+        )
+        if identity != allowed:
+            return None, None, "PR 任务不在明确授权白名单内"
+
+        branch_sha = discovery.get("remote_sha")
+        if not isinstance(branch_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", branch_sha):
+            return None, None, "PR 分支 SHA 格式无效"
+
+        pr_info = self.get_pr_info_for_branch(expected["branch"])
+        if not pr_info:
+            return None, None, "无法确认 PR #5 仍处于 open 状态"
+        if (
+            pr_info.get("number") != expected["pr_number"]
+            or pr_info.get("state") != "open"
+            or pr_info.get("draft")
+            or pr_info.get("head_ref") != expected["branch"]
+            or pr_info.get("head_sha") != branch_sha
+        ):
+            return None, None, "PR #5 状态、分支或最新 SHA 与发现结果不一致"
+
+        blob_res = subprocess.run(
+            ["git", "rev-parse", f"{branch_sha}:{expected['path']}"],
+            cwd=str(self.repo_root),
+            capture_output=True,
+            text=True,
+        )
+        if blob_res.returncode != 0 or blob_res.stdout.strip() != expected["blob_sha"]:
+            return None, None, "PR #5 任务文件与已授权版本不一致；为避免扩大范围，停止派发"
+
+        task_res = subprocess.run(
+            ["git", "show", f"{branch_sha}:{expected['path']}"],
+            cwd=str(self.repo_root),
+            capture_output=True,
+            text=True,
+        )
+        if task_res.returncode != 0 or not task_res.stdout.strip():
+            return None, None, "无法读取已授权的 PR #5 任务文件"
+
+        item = TaskItem(
+            id=expected["task_id"],
+            revision=1,
+            path=expected["path"],
+            authorized=True,
+        )
+        prompt = (
+            "执行下方唯一已授权的 PR #5 阶段 1 补充任务。严格只处理任务文件列出的阶段 1 内容。"
+            "如果本机素材不存在、工作区有用户改动或无法核实真实视频，停止并在 PR 中说明阻塞；"
+            "不得伪造观察结果，不得上传素材/帧图，不得合并 PR，不得开始阶段 2。"
+            "任务文件内容如下：\n\n"
+            + task_res.stdout
+        )
+        return item, prompt, None
+
+    def get_remote_branch_sha(self, branch_name: str) -> str | None:
+        """Return the fetched origin SHA for a validated branch name."""
+        if not re.fullmatch(r"[A-Za-z0-9._/-]+", branch_name) or ".." in branch_name:
+            return None
+        try:
+            res = subprocess.run(
+                ["git", "rev-parse", "--verify", f"origin/{branch_name}"],
+                cwd=str(self.repo_root),
+                capture_output=True,
+                text=True,
+            )
+            if res.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", res.stdout.strip()):
+                return res.stdout.strip()
+        except Exception:
+            pass
+        return None
+
+    def post_pr_comment(self, pr_number: int, comment: str) -> bool:
+        """Post a progress note without exposing credentials in logs."""
+        token = self._get_github_token()
+        if not token:
+            return False
+        try:
+            import urllib.request
+            url = f"https://api.github.com/repos/younuoqiqi1/video-moment-validation/issues/{pr_number}/comments"
+            body = json.dumps({"body": comment}).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=body,
+                method="POST",
+                headers={
+                    "Authorization": f"token {token}",
+                    "Accept": "application/vnd.github.v3+json",
+                    "Content-Type": "application/json",
+                    "User-Agent": "vmv-runner",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return 200 <= resp.status < 300
+        except Exception:
+            return False
+
     def get_registered_worktrees(self) -> list[dict[str, str]]:
         """
         Parse `git worktree list --porcelain`.
@@ -418,13 +540,39 @@ class LocalTaskRunner:
                 capture_output=True,
                 text=True,
             )
-            if status_res.returncode == 0:
-                for line in status_res.stdout.splitlines():
-                    if any(line.startswith(c) for c in ("U", "AA", "DD", "AU", "UD", "UA", "DU")):
-                        return None, f"worktree 存在未解决合并冲突: {worktree_dir}"
-                return worktree_dir, None
-            else:
+            if status_res.returncode != 0:
                 return None, f"无法获取 worktree 状态: {status_res.stderr.strip() or status_res.stdout.strip()}"
+            if status_res.stdout.strip():
+                return None, f"隔离 worktree 存在未提交改动，为保护已有文件而停止: {worktree_dir}"
+
+            remote_ref = f"origin/{target_branch}"
+            remote_check = subprocess.run(
+                ["git", "rev-parse", "--verify", remote_ref],
+                cwd=str(self.repo_root),
+                capture_output=True,
+                text=True,
+            )
+            if remote_check.returncode == 0:
+                local_head = self._get_worktree_head_sha(worktree_dir)
+                remote_head = remote_check.stdout.strip()
+                if local_head != remote_head:
+                    ancestor = subprocess.run(
+                        ["git", "merge-base", "--is-ancestor", local_head or "", remote_ref],
+                        cwd=str(self.repo_root),
+                        capture_output=True,
+                        text=True,
+                    )
+                    if ancestor.returncode != 0:
+                        return None, f"隔离 worktree 与远端分支已分叉，未执行覆盖或重置: {target_branch}"
+                    ff_res = subprocess.run(
+                        ["git", "merge", "--ff-only", remote_ref],
+                        cwd=str(worktree_dir),
+                        capture_output=True,
+                        text=True,
+                    )
+                    if ff_res.returncode != 0:
+                        return None, f"隔离 worktree 快进同步失败: {ff_res.stderr.strip() or ff_res.stdout.strip()}"
+            return worktree_dir, None
 
         # If worktree_dir does not exist, add it
         branch_exists_locally = subprocess.run(
@@ -726,7 +874,68 @@ class LocalTaskRunner:
                 self.sync_existing_deliveries(states)
                 self.save_state(states)
 
-            # 4. Check for revoked task authorizations
+            # 4. Resolve the one explicitly authorized PR task. All other
+            # PR-branch tasks remain non-executable.
+            pr_task_prompts: dict[str, str] = {}
+            pr_tasks = self.discover_pr_branch_tasks()
+            for pt in pr_tasks:
+                task_id = pt.get("task_id")
+                pr_num = pt.get("pr_number")
+                task_key = f"{task_id}:r1"
+                legacy_key = f"{task_id}:pr{pr_num}"
+                if task_key not in states and legacy_key in states:
+                    states[task_key] = states.pop(legacy_key)
+
+                item, prompt_text, resolve_err = self.resolve_authorized_pr_task(pt)
+                st = states.get(task_key)
+                if st is None:
+                    st = TaskState(
+                        task_id=str(task_id),
+                        revision=1,
+                        status="blocked" if resolve_err else "ready",
+                        pr_number=pr_num if isinstance(pr_num, int) else None,
+                        head_sha=pt.get("remote_sha"),
+                        head_branch=pt.get("branch"),
+                    )
+                    states[task_key] = st
+                st.pr_number = pr_num if isinstance(pr_num, int) else st.pr_number
+                st.head_branch = str(pt.get("branch") or st.head_branch or "")
+                if resolve_err:
+                    st.status = "blocked"
+                    st.last_error = resolve_err
+                    self.save_state(states)
+                    log_msg(f"[PR 任务阻塞] {task_key}: {resolve_err}")
+                    continue
+
+                previous_sha = st.head_sha
+                previous_status = st.status
+                # Keep the reviewed code SHA if its exact review report has arrived
+                # on this branch. The report commit itself can advance the PR head.
+                matching_review = None
+                if previous_status == "awaiting_review" and previous_sha:
+                    matching_review, _ = self.find_matching_review(st, snapshot_sha)
+
+                if previous_status == "discovered_readonly":
+                    st.status = "ready"
+                if previous_sha != pt["remote_sha"] and not matching_review:
+                    st.head_sha = pt["remote_sha"]
+                    if previous_status == "awaiting_review":
+                        st.status = "awaiting_review"
+                elif not st.head_sha:
+                    st.head_sha = pt["remote_sha"]
+
+                st.last_error = None if st.status in ("ready", "awaiting_review") else st.last_error
+                if item is not None and prompt_text is not None and st.status in ("ready", "awaiting_review"):
+                    queue = [queued for queued in queue if queued.id != item.id]
+                    queue.append(item)
+                    pr_task_prompts[task_key] = prompt_text
+                    log_msg(
+                        f"[PR 任务授权] PR #5 任务已核对：open、非草稿、分支 SHA 与任务文件版本一致；"
+                        f"状态 {st.status}。"
+                    )
+                self.save_state(states)
+
+            # 5. Block queue entries whose explicit authorization was revoked.
             active_queue_keys = {f"{item.id}:r{item.revision}": item for item in queue}
             for task_key, st in states.items():
                 if st.status in ("ready", "running"):
@@ -736,42 +945,6 @@ class LocalTaskRunner:
                         st.last_error = "远程队列已撤销对该任务的授权或任务已从队列移除"
                         self.save_state(states)
                         log_msg(f"任务 {task_key} 授权已被远端撤销，状态置为 blocked。")
-
-            # 5. Check and record PR branch tasks with strict security gate
-            pr_tasks = self.discover_pr_branch_tasks()
-            for pt in pr_tasks:
-                task_id = pt["task_id"]
-                pr_num = pt["pr_number"]
-                task_key = f"{task_id}:pr{pr_num}"
-                if task_key not in states:
-                    st = TaskState(
-                        task_id=task_id,
-                        revision=1,
-                        status="discovered_readonly",
-                        pr_number=pr_num,
-                        head_sha=pt["remote_sha"],
-                        head_branch=pt["branch"],
-                    )
-                    st.last_error = "安全门禁：当前轮次仅验证任务发现与拉取能力，按指令跳过视频处理 CLI 执行"
-                    states[task_key] = st
-                    self.save_state(states)
-                    log_msg(
-                        f"[PR 任务发现] 成功在 PR #{pr_num} ({pt['branch']}@{pt['remote_sha'][:7]}) 发现任务: "
-                        f"{pt['task_path']} ({pt['title']})"
-                    )
-                    log_msg(f"[安全门禁] 任务 {task_key} 已记录；保持只读发现验证状态，跳过视频处理 CLI 派发。")
-                else:
-                    st = states[task_key]
-                    if st.head_sha != pt["remote_sha"]:
-                        st.head_sha = pt["remote_sha"]
-                        self.save_state(states)
-                        log_msg(
-                            f"[PR 任务更新] PR #{pr_num} 分支更新到新提交: {pt['remote_sha'][:7]}"
-                        )
-                    log_msg(
-                        f"[PR 任务监控] PR #{pr_num} ({pt['branch']}@{pt['remote_sha'][:7]}): "
-                        f"{pt['task_path']} 状态: {st.status}"
-                    )
 
             # 6. Process actionable tasks from queue
             for item in queue:
@@ -818,6 +991,19 @@ class LocalTaskRunner:
                                 self.save_state(states)
                                 return 1
 
+                            pre_dispatch_head = self._get_worktree_head_sha(worktree_dir)
+                            if not pre_dispatch_head:
+                                st.status = "blocked"
+                                st.last_error = "无法读取隔离 worktree 当前 HEAD，未派发 CLI"
+                                self.save_state(states)
+                                return 1
+                            if item.id == AUTHORIZED_PR_TASK["task_id"]:
+                                remote_head = self.get_remote_branch_sha(target_branch)
+                                if not remote_head or remote_head != pre_dispatch_head:
+                                    st.status = "blocked"
+                                    st.last_error = "隔离 worktree 未与已核验 PR #5 最新远端 SHA 对齐，未派发 CLI"
+                                    self.save_state(states)
+                                    return 1
                             st.dispatched_reviews.append(dispatch_key)
                             st.status = "running"
                             st.attempt += 1
@@ -827,10 +1013,19 @@ class LocalTaskRunner:
                             def on_started(pid: int):
                                 st.pid = pid
                                 self.save_state(states)
+                                if st.pr_number == AUTHORIZED_PR_TASK["pr_number"]:
+                                    posted = self.post_pr_comment(
+                                        st.pr_number,
+                                        "@codex AGY 已开始处理已授权的阶段 1 补充任务。"
+                                        "正在核对 130 条清单、完整预览与长区间；本地素材抽查结果会单独记录。",
+                                    )
+                                    if not posted:
+                                        log_msg("PR 进度评论未能发送；AGY 任务仍继续运行。")
 
                             fix_prompt = (
-                                f"Codex 对 PR #{st.pr_number} (提交 {st.head_sha}) 提出了修改意见，"
-                                f"请仔细阅读以下审查报告并执行修正：\n\n{content}"
+                                pr_task_prompts.get(task_key, "")
+                                + f"\n\nCodex 对 PR #{st.pr_number} (提交 {st.head_sha}) 提出了修改意见，"
+                                + f"请严格在原任务范围内阅读以下审查报告并执行修正：\n\n{content}"
                             )
                             exec_res = self.execute_cli_task(
                                 item, fix_prompt, cwd=worktree_dir, on_started=on_started
@@ -842,9 +1037,9 @@ class LocalTaskRunner:
 
                             if code == 0:
                                 new_head = self._get_worktree_head_sha(worktree_dir)
-                                if new_head and st.head_sha and new_head == st.head_sha:
+                                if new_head and new_head == pre_dispatch_head:
                                     st.status = "blocked"
-                                    st.last_error = "CLI 执行未产生新的代码提交 (HEAD 与被审查提交相同)"
+                                    st.last_error = "CLI 执行未产生新的代码提交 (HEAD 与派发前一致)"
                                     self.save_state(states)
                                     log_msg(f"任务 {task_key} 阻塞: 未产生新代码提交")
                                     return 1
@@ -873,7 +1068,10 @@ class LocalTaskRunner:
                     continue
 
                 if st.status in ("ready",):
-                    prompt_text, prompt_err = self.get_task_prompt(item, snapshot_sha)
+                    prompt_text = pr_task_prompts.get(task_key)
+                    prompt_err = None
+                    if prompt_text is None:
+                        prompt_text, prompt_err = self.get_task_prompt(item, snapshot_sha)
                     if not prompt_text:
                         st.status = "blocked"
                         st.last_error = prompt_err or f"任务文件不存在或无法从远程读取: '{item.path}'"
@@ -890,6 +1088,19 @@ class LocalTaskRunner:
                         self.save_state(states)
                         return 1
 
+                    pre_dispatch_head = self._get_worktree_head_sha(worktree_dir)
+                    if not pre_dispatch_head:
+                        st.status = "blocked"
+                        st.last_error = "无法读取隔离 worktree 当前 HEAD，未派发 CLI"
+                        self.save_state(states)
+                        return 1
+                    if item.id == AUTHORIZED_PR_TASK["task_id"]:
+                        remote_head = self.get_remote_branch_sha(target_branch)
+                        if not remote_head or remote_head != pre_dispatch_head:
+                            st.status = "blocked"
+                            st.last_error = "隔离 worktree 未与已核验 PR #5 最新远端 SHA 对齐，未派发 CLI"
+                            self.save_state(states)
+                            return 1
                     st.status = "running"
                     st.attempt += 1
                     st.started_at = datetime.now(timezone.utc).isoformat()
@@ -898,6 +1109,14 @@ class LocalTaskRunner:
                     def on_started(pid: int):
                         st.pid = pid
                         self.save_state(states)
+                        if st.pr_number == AUTHORIZED_PR_TASK["pr_number"]:
+                            posted = self.post_pr_comment(
+                                st.pr_number,
+                                "@codex AGY 已开始处理已授权的阶段 1 补充任务。"
+                                "正在核对 130 条清单、完整预览与长区间；本地素材抽查结果会单独记录。",
+                            )
+                            if not posted:
+                                log_msg("PR 进度评论未能发送；AGY 任务仍继续运行。")
 
                     exec_res = self.execute_cli_task(
                         item, prompt_text, cwd=worktree_dir, on_started=on_started
@@ -1085,6 +1304,28 @@ class LocalTaskRunner:
 
         git_dir = self.repo_root / ".git"
         if git_dir.exists():
+            # A review record may be committed to the PR branch itself. Check this
+            # before origin/main so the runner can react without merging the PR.
+            if (
+                st.pr_number == AUTHORIZED_PR_TASK["pr_number"]
+                and st.task_id == AUTHORIZED_PR_TASK["task_id"]
+                and st.head_branch == AUTHORIZED_PR_TASK["branch"]
+            ):
+                try:
+                    branch_ref = f"origin/{AUTHORIZED_PR_TASK['branch']}"
+                    res = subprocess.run(
+                        ["git", "show", f"{branch_ref}:reviews/{target_name}"],
+                        cwd=str(self.repo_root),
+                        capture_output=True,
+                        text=True,
+                    )
+                    if res.returncode == 0 and res.stdout.strip():
+                        cached_path.parent.mkdir(parents=True, exist_ok=True)
+                        cached_path.write_text(res.stdout, encoding="utf-8")
+                        return cached_path, res.stdout
+                except Exception:
+                    pass
+
             sha = snapshot_sha or "origin/main"
             try:
                 res = subprocess.run(
