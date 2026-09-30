@@ -333,8 +333,12 @@ class LocalTaskRunner:
 
     def resolve_authorized_pr_task(
         self, discovery: dict[str, Any]
-    ) -> tuple[TaskItem | None, str | None, str | None]:
-        """Resolve only the single PR task whose exact scope was authorized."""
+    ) -> tuple[TaskItem | None, str | None, str | None, bool]:
+        """Resolve only the single PR task whose exact scope was authorized.
+        
+        The final bool marks errors that are safe to retry on the next poll.
+        Scope mismatches and closed/draft PRs are permanent blocks.
+        """
         expected = AUTHORIZED_PR_TASK
         identity = (
             discovery.get("task_id"),
@@ -349,23 +353,24 @@ class LocalTaskRunner:
             expected["path"],
         )
         if identity != allowed:
-            return None, None, "PR 任务不在明确授权白名单内"
+            return None, None, "PR 任务不在明确授权白名单内", False
 
         branch_sha = discovery.get("remote_sha")
         if not isinstance(branch_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", branch_sha):
-            return None, None, "PR 分支 SHA 格式无效"
+            return None, None, "PR 分支 SHA 格式无效", False
 
         pr_info = self.get_pr_info_for_branch(expected["branch"])
         if not pr_info:
-            return None, None, "无法确认 PR #5 仍处于 open 状态"
+            return None, None, "暂时无法从 GitHub 核验 PR #5 状态", True
         if (
             pr_info.get("number") != expected["pr_number"]
-            or pr_info.get("state") != "open"
-            or pr_info.get("draft")
             or pr_info.get("head_ref") != expected["branch"]
-            or pr_info.get("head_sha") != branch_sha
         ):
-            return None, None, "PR #5 状态、分支或最新 SHA 与发现结果不一致"
+            return None, None, "GitHub 返回的 PR 身份或分支不匹配", False
+        if pr_info.get("state") != "open" or pr_info.get("draft"):
+            return None, None, "PR #5 已关闭或处于草稿状态", False
+        if pr_info.get("head_sha") != branch_sha:
+            return None, None, "PR #5 的最新 SHA 尚未与本轮 fetch 对齐", True
 
         blob_res = subprocess.run(
             ["git", "rev-parse", f"{branch_sha}:{expected['path']}"],
@@ -374,7 +379,7 @@ class LocalTaskRunner:
             text=True,
         )
         if blob_res.returncode != 0 or blob_res.stdout.strip() != expected["blob_sha"]:
-            return None, None, "PR #5 任务文件与已授权版本不一致；为避免扩大范围，停止派发"
+            return None, None, "PR #5 任务文件与已授权版本不一致；为避免扩大范围，停止派发", False
 
         task_res = subprocess.run(
             ["git", "show", f"{branch_sha}:{expected['path']}"],
@@ -383,7 +388,7 @@ class LocalTaskRunner:
             text=True,
         )
         if task_res.returncode != 0 or not task_res.stdout.strip():
-            return None, None, "无法读取已授权的 PR #5 任务文件"
+            return None, None, "暂时无法读取已授权的 PR #5 任务文件", True
 
         item = TaskItem(
             id=expected["task_id"],
@@ -398,7 +403,7 @@ class LocalTaskRunner:
             "任务文件内容如下：\n\n"
             + task_res.stdout
         )
-        return item, prompt, None
+        return item, prompt, None, False
 
     def get_remote_branch_sha(self, branch_name: str) -> str | None:
         """Return the fetched origin SHA for a validated branch name."""
@@ -652,7 +657,7 @@ class LocalTaskRunner:
         b = branch_name.replace("refs/heads/", "").replace("origin/", "")
         try:
             import urllib.request
-            url = f"https://api.github.com/repos/younuoqiqi1/video-moment-validation/pulls?head=younuoqiqi1:{b}&state=open"
+            url = f"https://api.github.com/repos/younuoqiqi1/video-moment-validation/pulls?head=younuoqiqi1:{b}&state=all"
             req = urllib.request.Request(
                 url,
                 headers={
@@ -886,13 +891,13 @@ class LocalTaskRunner:
                 if task_key not in states and legacy_key in states:
                     states[task_key] = states.pop(legacy_key)
 
-                item, prompt_text, resolve_err = self.resolve_authorized_pr_task(pt)
+                item, prompt_text, resolve_err, retryable = self.resolve_authorized_pr_task(pt)
                 st = states.get(task_key)
                 if st is None:
                     st = TaskState(
                         task_id=str(task_id),
                         revision=1,
-                        status="blocked" if resolve_err else "ready",
+                        status=("ready" if retryable else "blocked") if resolve_err else "ready",
                         pr_number=pr_num if isinstance(pr_num, int) else None,
                         head_sha=pt.get("remote_sha"),
                         head_branch=pt.get("branch"),
@@ -901,10 +906,11 @@ class LocalTaskRunner:
                 st.pr_number = pr_num if isinstance(pr_num, int) else st.pr_number
                 st.head_branch = str(pt.get("branch") or st.head_branch or "")
                 if resolve_err:
-                    st.status = "blocked"
+                    st.status = "ready" if retryable else "blocked"
                     st.last_error = resolve_err
                     self.save_state(states)
-                    log_msg(f"[PR 任务阻塞] {task_key}: {resolve_err}")
+                    level = "等待重试" if retryable else "阻塞"
+                    log_msg(f"[PR 任务{level}] {task_key}: {resolve_err}")
                     continue
 
                 previous_sha = st.head_sha
