@@ -1,8 +1,8 @@
 # 阶段 0 审查报告 (Stage 0 Review)
 
 - **生成时间**：2026-09-30 (Asia/Shanghai)
-- **阶段状态**：`implementation_complete` / `awaiting_review`（功能实现及 R1–R3/R2a/R2b 修正已全部完成，待复核与验收）
-- **对应代码提交 (code_commit)**：`e9fd1feb19e6eb1c853f666b6c23f185d263a5ba`
+- **阶段状态**：`implementation_complete` / `awaiting_review`（功能实现及 R1–R3/R2a-1/R2a-2/R2b 修正已全部完成，待复核与验收）
+- **对应代码提交 (code_commit)**：`56c4a9eb49bc091ecb6ae6d944e85741639d7fc2`
 - **执行环境**：Mac (Darwin arm64, Apple Silicon)
 
 ---
@@ -11,7 +11,7 @@
 
 | 命令 | 退出码 | 判定结果 | 说明 |
 | :--- | :---: | :---: | :--- |
-| `.venv/bin/python -m pytest tests/test_cli.py -v` | `0` | **全部通过 (13/13 passed)** | 包含 R1/R2 及本次补充的 R2a 部分写入防御、R2b 路径解析与循环软链异常处理，详见 `reports/tests/stage0-test-summary.md` |
+| `.venv/bin/python -m pytest tests/test_cli.py -v` | `0` | **全部通过 (16/16 passed)** | 包含 R1/R2、R2b 路径解析异常，以及本次针对 R2a-1 双产物事务回滚与 R2a-2 预置旧文件严格保护的回归测试，详见 `reports/tests/stage0-test-summary.md` |
 | `.venv/bin/python -m vmv status --output environment.html` | `1` | **成功拦截 (R1 校验生效)** | 拒绝非 `.json` 扩展名，保护同名哨兵文件不被覆写 |
 | `.venv/bin/python -m vmv status --output outputs/stage0/environment.json` | `0` | **全部通过 (Passed 0)** | 准确探测并原子生成 JSON 与离线 HTML 环境核验报告，提示文字规范为“等待阶段验收” |
 
@@ -44,15 +44,17 @@
 
 ---
 
-## 4. R1–R3 及 R2a/R2b 修正说明
+## 4. 历次修正详细说明
 
 - **R1（输出路径碰撞防御）**：CLI 严格限制 `--output` 必须为 `.json` 后缀。若传入 `.html` 或非 `.json` 后缀，在写文件前直接拦截拒绝并返回非零退出码（退出码 1），绝不覆写已有的同名哨兵文件。
 - **R2（文件系统异常处理）**：对目录不存在、指向已有目录或权限受限等异常进行捕获，输出清晰中文说明与错误目标路径，返回非零退出码，不输出误导性成功信息。
-- **R2a（部分写入与残留成功报告防御）**：
-  - 调整发布流程：优先验证并发布 HTML 报告；若 HTML 发布失败，则绝不发布成功的 JSON 报告，避免给下游自动化程序留下误导性成功凭据。
-  - 若检测到写入异常，在内存与残留文件中强制将 `overall_status` 置为 `failed`，并在 `errors` 中如实记录报告发布失败原因，不将失败产物计入 `artifacts`。
+- **R2a-1（两阶段事务发布与失败回滚）**：
+  - 双报告作为整体事务发布。若 HTML 替换成功后 JSON 替换发生权限或文件系统异常，执行完整事务回滚：立即撤回/删除本次新生成的 HTML 产物，确保两个路径上绝不残留本次运行的“通过 (All Passed)”误导结论。
+- **R2a-2（调用前既有旧文件保护）**：
+  - 在正式发布前对调用前已有的旧文件（如用户预置的 `env.json` 或 `env.html` 哨兵）进行安全备份。
+  - 若发布阶段发生异常，完整回滚恢复调用前的既有文件内容；失败处理流程中彻底废弃直接 `open(..., "w")`，杜绝覆盖、截断或篡改调用前已存在的文件。
 - **R2b（路径解析与循环符号链接保护）**：
-  - 扩展路径校验捕获范围至 `(ValueError, OSError, RuntimeError)`，优雅捕获符号链接循环（`Symlink loop`）及路径权限拒绝异常，直接返回可读中文报错，不抛出未处理崩溃。
+  - 扩展路径校验捕获范围至 `(ValueError, OSError, RuntimeError)`，优雅捕获符号链接死循环（`Symlink loop`）及路径权限拒绝异常，直接返回可读中文报错，不抛出未处理崩溃。
 - **R3（报告与看板口径一致性）**：
   - 状态严谨标记为 `implementation_complete`，停留在 `awaiting_review`，不越权宣称正式验收通过。
   - 阶段 0 未最终验收前，进度看板保留 8%（明确标明为准备阶段估算）；待审查与验收通过后计入 10%。
