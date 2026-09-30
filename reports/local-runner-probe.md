@@ -111,16 +111,24 @@ python3 scripts/verify_offline_probe.py
 
 ## 6. 自动化测试证据
 
-全量测试执行环境：macOS Darwin (arm64), Python 3.12.14, pytest-9.1.1
-执行命令：
-```bash
-.venv/bin/pytest
-```
-测试结果：**37/37 passed in 3.77s**
-- `tests/test_cli.py`: 6 passed
-- `tests/test_offline_probe.py`: 8 passed（字节精确全等、前后缀拒绝、多行/引号拒绝、GUI进程检测、CLI进程区分、Worker成功/超时、Controller清理）
-- `tests/test_runner.py`: 19 passed（R1真实Git工作区保留extra commit、保留未知目录哨兵、主checkout脏文件保留、分支占用冲突报错、非Git根目录blocked；R2断网退出并保留状态、远端撤销授权自动blocked、远端队列损坏诊断退出；R3无PR/草稿PR/SHA不一致拒绝awaiting_review、三方一致进入awaiting_review、严格结论解析、启动回调异常终止子进程、PR #2 分支绑定；以及进程中断、去重等流转）
-- `tests/test_runner_service.py`: 4 passed
+### 6.1 Mac 本机全量自动化实测证据
+- **执行环境**：macOS Darwin (arm64), Python 3.12.14, pytest-9.1.1
+- **执行命令**：
+  ```bash
+  .venv/bin/pytest
+  ```
+- **实测结果**：**39/39 passed in 5.79s**
+  - `tests/test_cli.py`: 6 passed
+  - `tests/test_offline_probe.py`: 8 passed（字节精确全等、前后缀拒绝、多行/引号拒绝、GUI进程检测、CLI进程区分、Worker成功/超时、Controller清理）
+  - `tests/test_runner.py`: 21 passed（原 19 项审查边界测试 + 新增 2 项：`test_discover_pr_branch_tasks` 任务解析、`test_run_once_pr_branch_task_discovery_and_readonly_safety_gate` PR 任务只读安全门禁与 0 次 CLI 派发核验）
+  - `tests/test_runner_service.py`: 4 passed（launchd XML 生成、安装与卸载流程、状态解析、失败回滚）
+
+### 6.2 Codex 远端 Linux 独立重跑验证记录
+- **执行环境**：Codex 独立 Linux x86_64 容器环境（提交 `483fba7`）
+- **执行命令**：`python3 -m pytest -q`
+- **复核结果**：**39 项全部通过**（见 `reviews/pr-3-483fba73c576cadb56c51708934c0110632921fd.md`）
+- **证据来源与口径说明**：Codex 独立 Linux 环境确认了 Python 逻辑与 PR 分支只读门禁单元测试的跨平台正确性；macOS 系统特有的 LaunchAgent 托管与真实 122 秒间隔轮询日志则由第 8 节中的 Mac 本机运行环境提供，两套测试与运行证据来源明确区分，互不混淆。
+
 
 ---
 
