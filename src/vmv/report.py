@@ -425,36 +425,121 @@ def write_status_reports(output_json_path: Path, env_data: dict[str, Any]) -> tu
                 pass
         raise OSError(f"创建或写入临时 JSON 报告失败: '{json_path}'，原因: {exc}")
 
-    # 4. Publish HTML first (if this fails, JSON is never published as successful)
+    # 4. Check pre-existence of target files to allow transactional rollback without corrupting pre-existing user files
+    html_existed = html_path.exists()
+    json_existed = json_path.exists()
+
+    bak_html: Path | None = None
+    if html_existed and html_path.is_file():
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=parent_dir, prefix=".bak_html_", suffix=".bak", delete=False
+            ) as f_bak:
+                bak_html = Path(f_bak.name)
+            shutil.copy2(html_path, bak_html)
+        except OSError as exc:
+            for p in (tmp_html_path, tmp_json_path):
+                if p and p.exists():
+                    try:
+                        p.unlink()
+                    except OSError:
+                        pass
+            raise OSError(f"备份既有 HTML 报告失败: '{html_path}'，原因: {exc}")
+
+    bak_json: Path | None = None
+    if json_existed and json_path.is_file():
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=parent_dir, prefix=".bak_json_", suffix=".bak", delete=False
+            ) as f_bak:
+                bak_json = Path(f_bak.name)
+            shutil.copy2(json_path, bak_json)
+        except OSError as exc:
+            for p in (tmp_html_path, tmp_json_path, bak_html):
+                if p and p.exists():
+                    try:
+                        p.unlink()
+                    except OSError:
+                        pass
+            raise OSError(f"备份既有 JSON 报告失败: '{json_path}'，原因: {exc}")
+
+    # 5. Transactional dual publish
+    html_published = False
+    json_published = False
     try:
         os.replace(tmp_html_path, html_path)
+        html_published = True
         tmp_html_path = None
-    except OSError as exc:
-        if tmp_html_path and tmp_html_path.exists():
-            try:
-                tmp_html_path.unlink()
-            except OSError:
-                pass
-        if tmp_json_path and tmp_json_path.exists():
-            try:
-                tmp_json_path.unlink()
-            except OSError:
-                pass
-        raise OSError(f"写入 HTML 报告失败: '{html_path}'，原因: {exc}")
 
-    # 5. Publish JSON
-    try:
         os.replace(tmp_json_path, json_path)
+        json_published = True
         tmp_json_path = None
-    except OSError as exc:
-        if tmp_json_path and tmp_json_path.exists():
+
+        # Success! Clean up backup files
+        if bak_html and bak_html.exists():
             try:
-                tmp_json_path.unlink()
+                bak_html.unlink()
             except OSError:
                 pass
-        raise OSError(f"写入 JSON 报告失败: '{json_path}'，原因: {exc}")
+        if bak_json and bak_json.exists():
+            try:
+                bak_json.unlink()
+            except OSError:
+                pass
 
-    return json_path, html_path
+        return json_path, html_path
+
+    except Exception as exc:
+        # ROLLBACK:
+        # Clean up un-replaced temporary files
+        for p in (tmp_html_path, tmp_json_path):
+            if p and p.exists():
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+
+        # Roll back HTML: restore backup if existed, or unlink if newly created in this run
+        if html_published:
+            if bak_html and bak_html.exists():
+                try:
+                    os.replace(bak_html, html_path)
+                    bak_html = None
+                except OSError:
+                    pass
+            elif not html_existed and html_path.exists():
+                try:
+                    html_path.unlink()
+                except OSError:
+                    pass
+
+        # Roll back JSON: restore backup if existed, or unlink if newly created in this run
+        if json_published:
+            if bak_json and bak_json.exists():
+                try:
+                    os.replace(bak_json, json_path)
+                    bak_json = None
+                except OSError:
+                    pass
+            elif not json_existed and json_path.exists():
+                try:
+                    json_path.unlink()
+                except OSError:
+                    pass
+
+        # Clean any remaining backups
+        if bak_html and bak_html.exists():
+            try:
+                bak_html.unlink()
+            except OSError:
+                pass
+        if bak_json and bak_json.exists():
+            try:
+                bak_json.unlink()
+            except OSError:
+                pass
+
+        raise OSError(f"发布报告失败: {exc}")
 
 
 def run_status_stage(output_json_path: Path, timeout_sec: float = 5.0) -> StageResult:
@@ -494,13 +579,6 @@ def run_status_stage(output_json_path: Path, timeout_sec: float = 5.0) -> StageR
         env_data["errors"] = errors
         env_data["report_generation_status"] = "failed"
         env_data["report_generation_error"] = write_error
-        # Ensure that if target_json exists on disk and is a file, it is updated to failed status so no consumer can misread it as passed
-        if target_json.exists() and target_json.is_file():
-            try:
-                with open(target_json, "w", encoding="utf-8") as f:
-                    json.dump(env_data, f, ensure_ascii=False, indent=2)
-            except OSError:
-                pass
         artifacts = []
         status = "failed"
     else:

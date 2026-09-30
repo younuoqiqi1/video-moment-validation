@@ -294,3 +294,99 @@ def test_status_cli_resolve_permission_error_r2b(tmp_path: Path, capsys):
         captured = capsys.readouterr()
         assert "路径解析失败" in captured.out or "权限异常" in captured.out
         assert "所有环境依赖检查通过" not in captured.out
+
+
+def test_status_cli_json_permission_error_r2a_1(tmp_path: Path, capsys):
+    """
+    R2a-1 regression: When HTML publishes successfully but JSON publish raises PermissionError,
+    transactional rollback must remove the newly published HTML so no 'All Passed' HTML is left behind.
+    """
+    def mock_probe(cmd: list[str], timeout_sec: float = 5.0):
+        tool = cmd[0]
+        return True, f"{tool} 1.0.0", None
+
+    target_json = tmp_path / "rollback_test.json"
+    html_target = tmp_path / "rollback_test.html"
+
+    real_replace = os.replace
+
+    def fake_replace(src, dst):
+        if str(dst).endswith(".json"):
+            raise PermissionError("模拟写入 JSON 权限被拒绝")
+        return real_replace(src, dst)
+
+    with patch("vmv.report.probe_tool_version", side_effect=mock_probe):
+        with patch("os.replace", side_effect=fake_replace):
+            exit_code = main(["status", "--output", str(target_json)])
+            assert exit_code != 0
+
+            captured = capsys.readouterr()
+            assert "发布报告失败" in captured.out or "文件系统异常" in captured.out
+            assert "所有环境依赖检查通过" not in captured.out
+
+            # R2a-1 assertion: Newly published HTML must NOT remain on disk with "All Passed"
+            if html_target.exists():
+                html_text = html_target.read_text(encoding="utf-8")
+                assert "通过 (All Passed)" not in html_text
+            else:
+                assert not html_target.exists()
+
+            assert not target_json.exists()
+
+
+def test_status_cli_preexisting_json_untouched_r2a_2(tmp_path: Path, capsys):
+    """
+    R2a-2 regression: Pre-existing user JSON file must NOT be modified or overwritten when report generation fails.
+    """
+    def mock_probe(cmd: list[str], timeout_sec: float = 5.0):
+        tool = cmd[0]
+        return True, f"{tool} 1.0.0", None
+
+    target_json = tmp_path / "preexisting.json"
+    sentinel_content = '{"user_custom_data": "DO_NOT_OVERWRITE", "bytes": [1, 2, 3]}'
+    target_json.write_text(sentinel_content, encoding="utf-8")
+
+    # Create HTML target as a directory to trigger failure in HTML generation/publish
+    html_dir = tmp_path / "preexisting.html"
+    html_dir.mkdir()
+
+    with patch("vmv.report.probe_tool_version", side_effect=mock_probe):
+        exit_code = main(["status", "--output", str(target_json)])
+        assert exit_code != 0
+
+        # R2a-2 assertion: Pre-existing JSON bytes must remain completely untouched
+        assert target_json.read_text(encoding="utf-8") == sentinel_content
+        assert html_dir.is_dir()
+
+
+def test_status_cli_preexisting_both_restored_on_json_failure_r2a(tmp_path: Path, capsys):
+    """
+    R2a-1/R2a-2 regression: If both files existed before, and JSON publish fails,
+    the pre-existing HTML must be restored from backup rather than left with the new success HTML.
+    """
+    def mock_probe(cmd: list[str], timeout_sec: float = 5.0):
+        tool = cmd[0]
+        return True, f"{tool} 1.0.0", None
+
+    target_json = tmp_path / "dual_pre.json"
+    html_target = tmp_path / "dual_pre.html"
+
+    target_json.write_text("OLD_JSON_SENTINEL", encoding="utf-8")
+    html_target.write_text("OLD_HTML_SENTINEL", encoding="utf-8")
+
+    real_replace = os.replace
+
+    def fake_replace(src, dst):
+        if str(dst).endswith(".json"):
+            raise PermissionError("模拟写入 JSON 权限被拒绝")
+        return real_replace(src, dst)
+
+    with patch("vmv.report.probe_tool_version", side_effect=mock_probe):
+        with patch("os.replace", side_effect=fake_replace):
+            exit_code = main(["status", "--output", str(target_json)])
+            assert exit_code != 0
+
+            # Both pre-existing files must be restored to their original contents
+            assert target_json.read_text(encoding="utf-8") == "OLD_JSON_SENTINEL"
+            assert html_target.read_text(encoding="utf-8") == "OLD_HTML_SENTINEL"
+
