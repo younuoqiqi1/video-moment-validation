@@ -16,6 +16,7 @@ from scripts.verify_offline_probe import (
     check_host_app_closed,
     run_worker,
     run_controller,
+    cleanup_launchd_service,
     HOST_APP_SIGNATURE,
 )
 
@@ -187,3 +188,34 @@ def test_controller_always_unloads_and_unlinks_plist(tmp_path: Path):
             # Verify no .plist files remain in fake_plist_dir
             remaining_plists = list(fake_plist_dir.glob("*.plist"))
             assert len(remaining_plists) == 0
+
+
+def test_cleanup_launchd_service_preserves_plist_when_unload_fails(tmp_path: Path):
+    """Keep the plist for recovery and report failure if launchctl cannot unload."""
+    plist_path = tmp_path / "probe.plist"
+    plist_path.write_text("recovery data", encoding="utf-8")
+
+    with patch(
+        "scripts.verify_offline_probe.subprocess.run",
+        return_value=MagicMock(returncode=5, stdout="", stderr="service busy"),
+    ):
+        with pytest.raises(RuntimeError, match="卸载失败"):
+            cleanup_launchd_service(plist_path)
+
+    assert plist_path.read_text(encoding="utf-8") == "recovery data"
+
+
+def test_cleanup_launchd_service_unloads_before_removing_plist(tmp_path: Path):
+    """Remove the plist only after launchctl reports a successful unload."""
+    plist_path = tmp_path / "probe.plist"
+    plist_path.write_text("temporary config", encoding="utf-8")
+
+    with patch(
+        "scripts.verify_offline_probe.subprocess.run",
+        return_value=MagicMock(returncode=0, stdout="", stderr=""),
+    ) as mock_run:
+        cleanup_launchd_service(plist_path)
+
+    mock_run.assert_called_once()
+    assert mock_run.call_args.args[0][:3] == ["launchctl", "unload", "-w"]
+    assert not plist_path.exists()
