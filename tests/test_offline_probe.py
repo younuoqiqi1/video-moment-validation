@@ -219,3 +219,30 @@ def test_cleanup_launchd_service_unloads_before_removing_plist(tmp_path: Path):
     mock_run.assert_called_once()
     assert mock_run.call_args.args[0][:3] == ["launchctl", "unload", "-w"]
     assert not plist_path.exists()
+
+
+def test_worker_skips_cli_when_host_app_is_open(tmp_path: Path):
+    """Do not start AGY while the host GUI is open or closure is unverified."""
+    token = "APP_OPEN_TOKEN"
+    result_file = tmp_path / "result.json"
+    args = argparse.Namespace(
+        probe_dir=str(tmp_path),
+        result_file=str(result_file),
+        token=token,
+        delay_seconds=0,
+        agy_bin="fake_agy",
+        model="gemini-3.8-flash-high",
+    )
+
+    with patch("subprocess.Popen") as mock_popen, patch(
+        "scripts.verify_offline_probe.check_host_app_closed",
+        return_value=(False, True, "检测到宿主 GUI 进程运行中 (PID: 123)"),
+    ):
+        exit_code = run_worker(args)
+
+    mock_popen.assert_not_called()
+    assert exit_code == 1
+    data = json.loads(result_file.read_text(encoding="utf-8"))
+    assert data["exit_code"] == 125
+    assert data["cli_passed"] is False
+    assert "未启动 AGY CLI" in data["error"]
