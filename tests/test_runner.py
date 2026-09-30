@@ -520,7 +520,7 @@ def test_discover_pr_branch_tasks(tmp_path: Path):
 
 
 def test_run_once_pr_branch_task_discovery_and_readonly_safety_gate(tmp_path: Path):
-    """Only the pinned, authorized PR #5 task is dispatched, once, in an isolated worktree."""
+    """Only the pinned, authorized PR #5 task is dispatched once after transient failures."""
     repo = create_git_repo(tmp_path / "repo")
     runner = LocalTaskRunner(repo_root=repo, runner_dir=repo / ".vmv-runner")
 
@@ -538,6 +538,11 @@ def test_run_once_pr_branch_task_discovery_and_readonly_safety_gate(tmp_path: Pa
         path="tasks/stage1-preview-followup.md",
         authorized=True,
     )
+    resolver_results = [
+        (None, None, "GitHub 暂时无法核验", True),
+        (authorized_item, "已授权任务内容", None, False),
+        (authorized_item, "已授权任务内容", None, False),
+    ]
 
     with patch.object(runner, "fetch_remote_main", return_value=(True, "")):
         with patch.object(runner, "get_origin_main_sha", return_value="main_sha"):
@@ -546,8 +551,8 @@ def test_run_once_pr_branch_task_discovery_and_readonly_safety_gate(tmp_path: Pa
                     with patch.object(
                         runner,
                         "resolve_authorized_pr_task",
-                        return_value=(authorized_item, "已授权任务内容", None),
-                    ):
+                        side_effect=resolver_results,
+                    ) as mock_resolve:
                         with patch.object(runner, "prepare_worktree_for_task", return_value=(tmp_path, None)):
                             with patch.object(runner, "get_remote_branch_sha", return_value=mock_pr_task[0]["remote_sha"]):
                                 with patch.object(
@@ -560,31 +565,38 @@ def test_run_once_pr_branch_task_discovery_and_readonly_safety_gate(tmp_path: Pa
                                             runner, "execute_cli_task", return_value=(0, "已完成", 4321)
                                         ) as mock_exec:
                                             with patch.object(runner, "find_matching_review", return_value=(None, None)):
-                                                # First poll starts the task and records delivery for review.
-                                                exit_code = runner.run_once()
-                                                assert exit_code == 0
+                                                task_key = "stage1-preview-followup:r1"
+
+                                                # A transient GitHub read failure keeps the task retryable.
+                                                assert runner.run_once() == 0
+                                                assert mock_exec.call_count == 0
+                                                assert runner.load_state()[task_key].status == "ready"
+
+                                                # The next poll validates the fixed task and dispatches once.
+                                                assert runner.run_once() == 0
                                                 assert mock_exec.call_count == 1
                                                 assert mock_exec.call_args.args[0] == authorized_item
                                                 assert "已授权任务内容" in mock_exec.call_args.args[1]
                                                 loaded = runner.load_state()
-                                                task_key = "stage1-preview-followup:r1"
                                                 assert loaded[task_key].status == "awaiting_review"
                                                 assert loaded[task_key].pr_number == 5
                                                 assert loaded[task_key].head_sha == mock_pr_task[0]["remote_sha"]
                                                 assert loaded[task_key].attempt == 1
 
-                                                # With no matching review yet, the next poll waits and never repeats work.
-                                                exit_code2 = runner.run_once()
-                                                assert exit_code2 == 0
+                                                # With no matching review yet, the next poll never repeats the task.
+                                                assert runner.run_once() == 0
                                                 assert mock_exec.call_count == 1
+                                                assert mock_resolve.call_count == 3
 
     # A PR task with any different identity/path is rejected before reading or dispatching it.
-    item, prompt, err = runner.resolve_authorized_pr_task({
+    item, prompt, err, retryable = runner.resolve_authorized_pr_task({
         **mock_pr_task[0],
         "task_path": "tasks/other-task.md",
     })
     assert item is None
     assert prompt is None
     assert "不在明确授权白名单" in (err or "")
+    assert retryable is False
+
 
 
