@@ -599,4 +599,88 @@ def test_run_once_pr_branch_task_discovery_and_readonly_safety_gate(tmp_path: Pa
     assert retryable is False
 
 
+@pytest.mark.parametrize(
+    "pr_change,blob_sha,retryable",
+    [
+        ({"state": "closed"}, "d24aecccdbde1fce7dc28801936dcaeb2bbb564e", False),
+        ({"draft": True}, "d24aecccdbde1fce7dc28801936dcaeb2bbb564e", False),
+        ({"number": 6}, "d24aecccdbde1fce7dc28801936dcaeb2bbb564e", False),
+        ({"head_sha": "f" * 40}, "d24aecccdbde1fce7dc28801936dcaeb2bbb564e", True),
+        ({}, "0" * 40, False),
+    ],
+)
+def test_resolver_rejects_pr_or_task_version_mismatch(
+    tmp_path: Path, pr_change: dict, blob_sha: str, retryable: bool
+):
+    """A closed/draft/wrong PR or modified task cannot become an executable task."""
+    runner = LocalTaskRunner(repo_root=tmp_path, runner_dir=tmp_path / ".vmv-runner")
+    branch_sha = "20cd362cd88df183b062991a14f2ac50c9b6703f"
+    discovery = {
+        "task_id": "stage1-preview-followup",
+        "pr_number": 5,
+        "branch": "feat/stage1-media-import",
+        "remote_sha": branch_sha,
+        "task_path": "tasks/stage1-preview-followup.md",
+    }
+    pr_info = {
+        "number": 5,
+        "state": "open",
+        "draft": False,
+        "head_ref": "feat/stage1-media-import",
+        "head_sha": branch_sha,
+        **pr_change,
+    }
+
+    def git_object(cmd, **kwargs):
+        if cmd[1] == "rev-parse":
+            return subprocess.CompletedProcess(cmd, 0, stdout=blob_sha + "\n", stderr="")
+        raise AssertionError("Rejected task must not read or execute the task prompt")
+
+    with patch.object(runner, "get_pr_info_for_branch", return_value=pr_info):
+        with patch("vmv.runner.subprocess.run", side_effect=git_object):
+            item, prompt, error, can_retry = runner.resolve_authorized_pr_task(discovery)
+
+    assert item is None
+    assert prompt is None
+    assert error
+    assert can_retry is retryable
+
+
+def test_resolver_accepts_only_pinned_task_after_pr_and_blob_checks(tmp_path: Path):
+    """A live PR with the exact task blob yields the authorized prompt."""
+    runner = LocalTaskRunner(repo_root=tmp_path, runner_dir=tmp_path / ".vmv-runner")
+    branch_sha = "20cd362cd88df183b062991a14f2ac50c9b6703f"
+    discovery = {
+        "task_id": "stage1-preview-followup",
+        "pr_number": 5,
+        "branch": "feat/stage1-media-import",
+        "remote_sha": branch_sha,
+        "task_path": "tasks/stage1-preview-followup.md",
+    }
+    pr_info = {
+        "number": 5, "state": "open", "draft": False,
+        "head_ref": "feat/stage1-media-import", "head_sha": branch_sha,
+    }
+
+    def git_object(cmd, **kwargs):
+        if cmd[1] == "rev-parse":
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout="d24aecccdbde1fce7dc28801936dcaeb2bbb564e\n", stderr=""
+            )
+        if cmd[1] == "show":
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout="# AGY 任务：阶段 1 镜头清单核对补充\n", stderr=""
+            )
+        raise AssertionError("Unexpected Git operation")
+
+    with patch.object(runner, "get_pr_info_for_branch", return_value=pr_info):
+        with patch("vmv.runner.subprocess.run", side_effect=git_object):
+            item, prompt, error, can_retry = runner.resolve_authorized_pr_task(discovery)
+
+    assert item is not None and item.authorized
+    assert item.id == "stage1-preview-followup"
+    assert "阶段 1 镜头清单核对补充" in (prompt or "")
+    assert error is None
+    assert can_retry is False
+
 
