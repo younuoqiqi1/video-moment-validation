@@ -1,6 +1,7 @@
 """Tests for CLI status and environment verification."""
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -186,3 +187,110 @@ def test_status_cli_python_version_insufficient(tmp_path: Path):
             assert data["overall_status"] == "failed"
             assert "Python >= 3.12" in data["missing_items"]
             assert any("3.12" in err for err in data["errors"])
+
+
+def test_status_cli_html_directory_failure_r2a(tmp_path: Path, capsys):
+    """
+    R2a regression: When HTML destination is a directory, writing HTML fails.
+    Assert non-zero exit, Chinese explanation, no success message,
+    artifacts list is empty, and any residual JSON has overall_status="failed".
+    """
+    def mock_probe(cmd: list[str], timeout_sec: float = 5.0):
+        tool = cmd[0]
+        return True, f"{tool} 1.0.0", None
+
+    html_dir = tmp_path / "env.html"
+    html_dir.mkdir()
+    target_json = tmp_path / "env.json"
+
+    with patch("vmv.report.probe_tool_version", side_effect=mock_probe):
+        # 1. Test CLI main()
+        exit_code = main(["status", "--output", str(target_json)])
+        assert exit_code != 0
+
+        # Assert user directory is preserved
+        assert html_dir.is_dir()
+
+        captured = capsys.readouterr()
+        assert "文件系统异常" in captured.out or "写入 HTML 报告失败" in captured.out
+        assert "所有环境依赖检查通过" not in captured.out
+
+        # If a JSON exists, assert it does NOT claim overall_status="passed"
+        if target_json.exists():
+            data = json.loads(target_json.read_text(encoding="utf-8"))
+            assert data["overall_status"] == "failed"
+            assert "report_generation_status" in data
+            assert data["report_generation_status"] == "failed"
+
+        # 2. Test run_status_stage directly
+        res = run_status_stage(target_json)
+        assert res.status == "failed"
+        assert res.artifacts == []
+        assert res.details.get("overall_status") == "failed"
+        assert any("HTML" in e or "文件系统" in e for e in res.errors)
+
+
+def test_status_cli_html_permission_error_r2a(tmp_path: Path, capsys):
+    """
+    R2a regression: When publishing HTML raises PermissionError during os.replace.
+    Assert non-zero exit, no success output, and no misleading success JSON.
+    """
+    def mock_probe(cmd: list[str], timeout_sec: float = 5.0):
+        tool = cmd[0]
+        return True, f"{tool} 1.0.0", None
+
+    target_json = tmp_path / "test_perm.json"
+    html_target = tmp_path / "test_perm.html"
+
+    real_replace = os.replace
+
+    def fake_replace(src, dst):
+        if str(dst).endswith(".html"):
+            raise PermissionError("模拟写入 HTML 权限被拒绝")
+        return real_replace(src, dst)
+
+    with patch("vmv.report.probe_tool_version", side_effect=mock_probe):
+        with patch("os.replace", side_effect=fake_replace):
+            exit_code = main(["status", "--output", str(target_json)])
+            assert exit_code != 0
+
+            captured = capsys.readouterr()
+            assert "写入 HTML 报告失败" in captured.out or "文件系统异常" in captured.out
+            assert "所有环境依赖检查通过" not in captured.out
+
+            if target_json.exists():
+                data = json.loads(target_json.read_text(encoding="utf-8"))
+                assert data["overall_status"] == "failed"
+
+
+def test_status_cli_symlink_loop_r2b(tmp_path: Path, capsys):
+    """
+    R2b regression: Symlink loop must be caught as a Chinese error, not unhandled RuntimeError.
+    """
+    loop_target = tmp_path / "loop.json"
+    try:
+        os.symlink(str(loop_target), str(loop_target))
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlink creation not supported on this filesystem")
+
+    exit_code = main(["status", "--output", str(loop_target)])
+    assert exit_code != 0
+
+    captured = capsys.readouterr()
+    assert "路径解析失败" in captured.out or "符号链接循环" in captured.out
+    assert "所有环境依赖检查通过" not in captured.out
+
+
+def test_status_cli_resolve_permission_error_r2b(tmp_path: Path, capsys):
+    """
+    R2b regression: Path.resolve raising OSError/PermissionError must be caught gracefully.
+    """
+    target = tmp_path / "resolve_fail.json"
+
+    with patch.object(Path, "resolve", side_effect=PermissionError("模拟路径解析无权限")):
+        exit_code = main(["status", "--output", str(target)])
+        assert exit_code != 0
+
+        captured = capsys.readouterr()
+        assert "路径解析失败" in captured.out or "权限异常" in captured.out
+        assert "所有环境依赖检查通过" not in captured.out

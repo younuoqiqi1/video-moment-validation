@@ -56,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
             print("\n请修正上述问题后重新运行。")
             return 1
 
-        print("\n所有环境依赖检查通过，可以进入下一阶段。")
+        print("\n所有环境依赖检查通过，等待阶段验收。")
         return 0
 
     return 0
