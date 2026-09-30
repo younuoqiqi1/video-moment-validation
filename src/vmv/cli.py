@@ -49,11 +49,11 @@ def main(argv: list[str] | None = None) -> int:
         for art in result.artifacts:
             print(f"  - {art}")
 
-        if result.errors:
-            print("\n缺失或不符合要求的依赖项:")
+        if result.errors or result.status != "passed":
+            print("\n未通过原因与错误说明:")
             for err in result.errors:
                 print(f"  * {err}")
-            print("\n请安装或修复上述依赖后重新运行。")
+            print("\n请修正上述问题后重新运行。")
             return 1
 
         print("\n所有环境依赖检查通过，可以进入下一阶段。")

@@ -69,8 +69,9 @@ def check_environment(timeout_sec: float = 5.0) -> dict[str, Any]:
     errors: list[str] = []
 
     # 1. Python check
-    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    py_valid = sys.version_info >= (3, 12)
+    major, minor, micro = sys.version_info[0], sys.version_info[1], sys.version_info[2]
+    py_ver = f"{major}.{minor}.{micro}"
+    py_valid = (major, minor) >= (3, 12)
     tools["python"] = {
         "name": "Python",
         "required": True,
@@ -345,37 +346,103 @@ def generate_html_report(env_data: dict[str, Any]) -> str:
 """
 
 
+def validate_output_paths(output_json_path: Path) -> tuple[Path, Path]:
+    """
+    Validate that output_json_path is a .json file and distinct from HTML.
+    Raises ValueError with Chinese explanation if invalid.
+    """
+    if output_json_path.suffix.lower() != ".json":
+        raise ValueError(
+            f"输出报告路径必须以 .json 结尾（不区分大小写），实际提供: '{output_json_path}'"
+        )
+
+    resolved_json = output_json_path.resolve()
+    resolved_html = resolved_json.with_suffix(".html")
+
+    if resolved_json == resolved_html:
+        raise ValueError(
+            f"JSON 与 HTML 报告路径冲突（两者完全相同）: '{resolved_json}'"
+        )
+
+    return resolved_json, resolved_html
+
+
 def write_status_reports(output_json_path: Path, env_data: dict[str, Any]) -> tuple[Path, Path]:
-    """Write both JSON and HTML status reports atomically."""
-    output_json_path = output_json_path.resolve()
-    output_json_path.parent.mkdir(parents=True, exist_ok=True)
+    """Write both JSON and HTML status reports with path validation and error handling."""
+    json_path, html_path = validate_output_paths(output_json_path)
 
-    html_path = output_json_path.with_suffix(".html")
+    # 1. Ensure parent directory exists
+    try:
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise OSError(f"无法创建输出目录: '{json_path.parent}'，原因: {exc}")
 
-    # Write JSON atomically
-    tmp_json = output_json_path.with_name(f"{output_json_path.name}.tmp")
-    with open(tmp_json, "w", encoding="utf-8") as f:
-        json.dump(env_data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_json, output_json_path)
+    # 2. Write JSON
+    tmp_json = json_path.with_name(f"{json_path.name}.tmp")
+    try:
+        with open(tmp_json, "w", encoding="utf-8") as f:
+            json.dump(env_data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_json, json_path)
+    except OSError as exc:
+        if tmp_json.exists():
+            try:
+                tmp_json.unlink()
+            except OSError:
+                pass
+        raise OSError(f"写入 JSON 报告失败: '{json_path}'，原因: {exc}")
 
-    # Write HTML atomically
+    # 3. Write HTML
     html_content = generate_html_report(env_data)
     tmp_html = html_path.with_name(f"{html_path.name}.tmp")
-    with open(tmp_html, "w", encoding="utf-8") as f:
-        f.write(html_content)
-    os.replace(tmp_html, html_path)
+    try:
+        with open(tmp_html, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        os.replace(tmp_html, html_path)
+    except OSError as exc:
+        if tmp_html.exists():
+            try:
+                tmp_html.unlink()
+            except OSError:
+                pass
+        raise OSError(f"写入 HTML 报告失败: '{html_path}'，原因: {exc}")
 
-    return output_json_path, html_path
+    return json_path, html_path
 
 
 def run_status_stage(output_json_path: Path, timeout_sec: float = 5.0) -> StageResult:
     """Execute Stage 0 status check and produce reports."""
-    env_data = check_environment(timeout_sec=timeout_sec)
-    json_path, html_path = write_status_reports(output_json_path, env_data)
+    # Validate output path before performing probes or creating files
+    try:
+        target_json, target_html = validate_output_paths(output_json_path)
+    except ValueError as exc:
+        return StageResult(
+            stage="stage0_environment",
+            status="failed",
+            artifacts=[],
+            errors=[f"输出路径校验未通过: {exc}"],
+            details={"error_type": "invalid_path"},
+        )
 
-    status = env_data["overall_status"]
-    artifacts = [str(json_path), str(html_path)]
-    errors = env_data["errors"]
+    env_data = check_environment(timeout_sec=timeout_sec)
+
+    artifacts: list[str] = []
+    write_error: str | None = None
+    try:
+        json_path, html_path = write_status_reports(target_json, env_data)
+        artifacts = [str(json_path), str(html_path)]
+    except (OSError, ValueError) as exc:
+        if target_json.exists():
+            artifacts.append(str(target_json))
+        write_error = f"文件系统异常: {exc}"
+
+    errors = list(env_data["errors"])
+    if write_error:
+        errors.append(write_error)
+
+    if write_error:
+        status = "failed"
+    else:
+        status = env_data["overall_status"]
 
     return StageResult(
         stage="stage0_environment",

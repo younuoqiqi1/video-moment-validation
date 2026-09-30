@@ -117,3 +117,72 @@ def test_status_cli_missing_tool_exit_code_1(tmp_path: Path):
         html_text = out_file.with_suffix(".html").read_text(encoding="utf-8")
         assert "待修复/安装项清单" in html_text
         assert "未通过" in html_text
+
+
+def test_status_cli_rejects_non_json_output_r1(tmp_path: Path, capsys):
+    """
+    R1 regression: Reject non-.json output (e.g. environment.html) before writing.
+    Preserve existing sentinel file and exit non-zero.
+    """
+    html_target = tmp_path / "environment.html"
+    sentinel_content = "<!-- SENTINEL CONTENT: DO NOT OVERWRITE -->"
+    html_target.write_text(sentinel_content, encoding="utf-8")
+
+    exit_code = main(["status", "--output", str(html_target)])
+    assert exit_code != 0
+
+    # Ensure sentinel content was preserved and not overwritten
+    assert html_target.read_text(encoding="utf-8") == sentinel_content
+
+    captured = capsys.readouterr()
+    assert ".json" in captured.out
+    assert "输出报告路径必须以 .json 结尾" in captured.out
+    assert "所有环境依赖检查通过" not in captured.out
+
+
+def test_status_cli_filesystem_error_handling_r2(tmp_path: Path, capsys):
+    """
+    R2 regression: Handle filesystem errors (e.g. target is a directory or parent is a file).
+    Return non-zero and output clear Chinese error without claiming success.
+    """
+    # Case A: output path is an existing directory with .json suffix
+    conflict_dir = tmp_path / "conflict.json"
+    conflict_dir.mkdir()
+
+    exit_code_a = main(["status", "--output", str(conflict_dir)])
+    assert exit_code_a != 0
+    captured_a = capsys.readouterr()
+    assert "文件系统异常" in captured_a.out or "写入 JSON 报告失败" in captured_a.out
+    assert "所有环境依赖检查通过" not in captured_a.out
+
+    # Case B: parent directory is a regular file
+    file_as_dir = tmp_path / "blocker_file"
+    file_as_dir.write_text("i am a file", encoding="utf-8")
+    blocked_target = file_as_dir / "env.json"
+
+    exit_code_b = main(["status", "--output", str(blocked_target)])
+    assert exit_code_b != 0
+    captured_b = capsys.readouterr()
+    assert "无法创建输出目录" in captured_b.out or "文件系统异常" in captured_b.out
+    assert "所有环境依赖检查通过" not in captured_b.out
+
+
+def test_status_cli_python_version_insufficient(tmp_path: Path):
+    """Verify check_environment fails when Python version < 3.12."""
+    def mock_probe(cmd: list[str], timeout_sec: float = 5.0):
+        tool = cmd[0]
+        return True, f"{tool} 1.0.0", None
+
+    old_py_version_info = (3, 11, 5, "final", 0)
+    out_file = tmp_path / "env_old_py.json"
+
+    with patch("sys.version_info", old_py_version_info):
+        with patch("vmv.report.probe_tool_version", side_effect=mock_probe):
+            exit_code = main(["status", "--output", str(out_file)])
+            assert exit_code == 1
+
+            assert out_file.exists()
+            data = json.loads(out_file.read_text(encoding="utf-8"))
+            assert data["overall_status"] == "failed"
+            assert "Python >= 3.12" in data["missing_items"]
+            assert any("3.12" in err for err in data["errors"])
