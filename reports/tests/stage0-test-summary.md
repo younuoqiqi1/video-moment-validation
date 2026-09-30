@@ -4,17 +4,17 @@
 - **Python 版本**：Python 3.12.14 (Darwin arm64)
 - **测试框架**：pytest 9.1.1, pluggy 1.6.0
 - **运行命令**：`.venv/bin/python -m pytest tests/test_cli.py -v`
-- **对应代码提交 (code_commit)**：`56c4a9eb49bc091ecb6ae6d944e85741639d7fc2`
+- **对应代码提交 (code_commit)**：`dcac835c5962c61305968fc483e723324db53b55`
 
 ---
 
 ## 1. 测试结果统计
 
-- **总用例数**：16
-- **通过数量**：16 passed
+- **总用例数**：18
+- **通过数量**：18 passed
 - **失败数量**：0 failed
 - **跳过/未运行**：0
-- **执行耗时**：~5.20s
+- **执行耗时**：~0.30s
 
 ---
 
@@ -38,3 +38,5 @@
 | `tests/test_cli.py::test_status_cli_json_permission_error_r2a_1` | `PASSED` | **R2a-1 必修**：JSON 发布失败时回滚撤销新发布的 HTML，断言不残留任何“通过”结论 |
 | `tests/test_cli.py::test_status_cli_preexisting_json_untouched_r2a_2` | `PASSED` | **R2a-2 必修**：预置旧 JSON 哨兵，报告失败时断言旧 JSON 字节完全不变 |
 | `tests/test_cli.py::test_status_cli_preexisting_both_restored_on_json_failure_r2a` | `PASSED` | **R2a-1/2 必修**：双预置文件场景下 JSON 失败，断言旧 HTML 与旧 JSON 均完整恢复 |
+| `tests/test_cli.py::test_status_cli_dual_fault_json_publish_and_html_restore_failed_r2a` | `PASSED` | **R2a-1/2 强化**：JSON 发布失败且 HTML 回滚恢复失败，断言旧 HTML 备份安全保留、字节完整、错误中包含两次失败原因和恢复路径、返回非零 |
+| `tests/test_cli.py::test_status_cli_html_unlink_failed_on_rollback_r2a` | `PASSED` | **R2a-1 强化**：新发布 HTML 在回滚撤回时 unlink 失败，断言清楚记录残留路径与撤回失败原因，不静默吞掉，返回非零 |
