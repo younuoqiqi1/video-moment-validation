@@ -8,8 +8,8 @@
 
 | 阶段 | 权重 | 状态 | 已完成 | 你的验收入口 | 阻塞项 |
 |---|---:|---|---:|---|---|
-| 0. 项目与工具准备 | 10% | 待安装 FFmpeg | 9% | `outputs/stage0/environment.html`<br>`reports/stage0-review.md` | FFmpeg、ffprobe 未安装 |
-| 1. 素材导入与时间码清单 | 15% | 未开始 | 0% | 查看视频信息、字幕与镜头清单 | 20–30 分钟测试素材；阶段 0 |
+| 0. 项目与工具准备 | 10% | 已通过 | 10% | `outputs/stage0/environment.html`<br>`reports/stage0-review.md` | 无（全部通过） |
+| 1. 素材导入与时间码清单 | 15% | 待开始 | 0% | 查看视频信息、字幕与镜头清单 | 20–30 分钟测试素材 |
 | 2. 口播稿拆段与画面需求 | 15% | 未开始 | 0% | 查看每段台词对应的检索条件 | 确认后的口播稿 |
 | 3. 候选镜头检索 | 25% | 未开始 | 0% | 每段预览最多 3 个候选镜头 | 阶段 1、2 |
 | 4. 人工选择与生产单 | 15% | 未开始 | 0% | 选定镜头并下载 JSON 生产单 | 阶段 3 |
@@ -28,9 +28,9 @@
 - [x] 将 Antigravity 与 GPT 额度恢复续跑纳入设计和实施计划
 - [x] 整理 Mac 本地执行交接与第一阶段 AGY 任务
 - [x] 用户在 Mac 打开独立 Git 项目
-- [x] 核验 Mac 上的 Python、FFmpeg、ffprobe、Git 和 AGY（已实测：Python 3.12/Git/AGY 就绪，FFmpeg/ffprobe 缺失）
+- [x] 核验 Mac 上的 Python、FFmpeg、ffprobe、Git 和 AGY（实测全通过：Python 3.12/Git/AGY/FFmpeg 7.0/ffprobe 7.0 全部就绪）
 - [x] 确认 Mac 上 AGY 能实际完成一个最小任务（完成 L0 CLI 与测试套件开发，单元测试 6/6 通过）
-- [ ] 安装并配置 FFmpeg、ffprobe 依赖
+- [x] 安装并配置 FFmpeg、ffprobe 依赖（已成功部署到 PATH）
 - [ ] 关联用户指定的 GitHub 仓库（若需要）
 - [ ] 实现并验证 AGY 额度恢复续跑（尚未开发）
 - [ ] 确认 GPT 自动续跑能力（未接通，不承诺自动唤醒）
