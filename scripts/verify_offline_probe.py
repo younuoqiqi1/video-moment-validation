@@ -113,29 +113,33 @@ def run_worker(args: argparse.Namespace) -> int:
 
     cli_exit_code = 1
     cli_error: str | None = None
-    try:
-        with open(stdout_file, "w", encoding="utf-8") as out_f, open(
-            stderr_file, "w", encoding="utf-8"
-        ) as err_f:
-            proc = subprocess.Popen(
-                cmd,
-                cwd=str(probe_dir),
-                stdout=out_f,
-                stderr=err_f,
-            )
-            cli_exit_code = proc.wait(timeout=600.0)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+    if not app_closed or not app_closed_verified:
+        cli_exit_code = 125
+        cli_error = f"未启动 AGY CLI：宿主 GUI 未确认关闭（{app_check_evidence}）"
+    else:
         try:
-            proc.wait(timeout=5.0)
-        except Exception:
-            pass
-        cli_exit_code = 124
-        cli_error = "AGY CLI 执行超时 (600s)"
-    except Exception as exc:
-        cli_exit_code = 1
-        cli_error = f"启动或执行 AGY CLI 异常: {exc}"
-
+            with open(stdout_file, "w", encoding="utf-8") as out_f, open(
+                stderr_file, "w", encoding="utf-8"
+            ) as err_f:
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=str(probe_dir),
+                    stdout=out_f,
+                    stderr=err_f,
+                )
+                cli_exit_code = proc.wait(timeout=600.0)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.wait(timeout=5.0)
+            except Exception:
+                pass
+            cli_exit_code = 124
+            cli_error = "AGY CLI 执行超时 (600s)"
+        except Exception as exc:
+            cli_exit_code = 1
+            cli_error = f"启动或执行 AGY CLI 异常: {exc}"
+    
     end_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     token_match = verify_probe_bytes(target_file, token)
@@ -166,7 +170,7 @@ def run_worker(args: argparse.Namespace) -> int:
     with open(result_file, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
-    return 0 if (cli_exit_code == 0 and token_match and app_closed) else 1
+    return 0 if (cli_exit_code == 0 and token_match and app_closed and app_closed_verified) else 1
 
 
 
