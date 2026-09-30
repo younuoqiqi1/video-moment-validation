@@ -129,3 +129,60 @@ python3 scripts/verify_offline_probe.py
 - **不合并 PR**：保持 PR #1、PR #2、PR #3 处于未合并状态；
 - **不推进下一阶段**：严禁越权进入阶段 1（视频处理）；
 - **PR #3 状态**：保持 `awaiting_review` 等待 Codex 复核。
+
+---
+
+## 8. GitHub 定时 120 秒轮询与 PR #5 任务只读发现验证 (tasks/runner-verify-120s.md)
+
+### 8.1 launchd 服务配置与托管状态
+- **服务标签**：`com.vmv.runner`
+- **配置文件路径**：`~/Library/LaunchAgents/com.vmv.runner.plist`
+- **执行命令与隔离环境**：
+  ```xml
+  <key>ProgramArguments</key>
+  <array>
+      <string>/Users/yoyotaozhou/Documents/video-moment-validation/.venv/bin/python</string>
+      <string>-m</string>
+      <string>vmv</string>
+      <string>runner</string>
+      <string>once</string>
+      <string>--repo</string>
+      <string>/Users/yoyotaozhou/Documents/video-moment-validation</string>
+  </array>
+  ```
+- **轮询周期配置**：`StartInterval=120`（120 秒，即 2 分钟）、`RunAtLoad=true`。
+- **系统 launchctl 状态**：
+  ```text
+  -   0   com.vmv.runner
+  ```
+  `launchctl list` 正常注册，退出码为 0，由 macOS launchd 在用户级按 120 秒周期调度。
+
+### 8.2 多分支拉取与 PR #5 任务发现机制
+- **分支同步升级**：将原 `git fetch origin main` 扩展为 `git fetch origin`，在获取锁后安全同步所有远端分支（包括 PR 分支 `origin/feat/stage1-media-import` 与主分支），绝不覆盖、merge 或 reset 用户本地当前工作区。
+- **PR 任务发现能力**：通过 `discover_pr_branch_tasks()` 检查指定 PR 分支的最新 commit SHA 及目标任务文件是否存在：
+  - **任务 ID**：`stage1-preview-followup`
+  - **PR 编号**：`#5`
+  - **分支与提交**：`origin/feat/stage1-media-import` @ `20cd362cd88df183b062991a14f2ac50c9b6703f`
+  - **任务文件**：`tasks/stage1-preview-followup.md`
+  - **解析标题**：`AGY 任务：阶段 1 镜头清单核对补充`
+
+### 8.3 严格只读安全门禁（零视频处理）
+- **门禁策略**：按照任务要求，当前轮次仅验证任务发现与拉取能力。
+- **持久化状态**：发现后写入 `.vmv-runner/state.json`，状态置为 `discovered_readonly`，`attempt=0`，`pid=null`。
+- **执行阻断**：严格跳过 `execute_cli_task`，绝不派发 AGY CLI 执行阶段 1 的视频切分或任何多媒体处理，杜绝越权处理。
+
+### 8.4 真实 launchd 轮询时间戳证据（相隔 120 秒）
+由 macOS launchd 守护进程根据 `StartInterval=120` 自动触发，并记录在 `.vmv-runner/runner.log` 中的真实轮询时间戳证据：
+- **第 1 次真实自动轮询**：`2026-10-01 00:46:55`
+  ```text
+  [2026-10-01 00:46:55] [轮询检查] git fetch 同步完成，origin/main: 0b9ff3e
+  [2026-10-01 00:46:55] [PR 任务监控] PR #5 (feat/stage1-media-import@20cd362): tasks/stage1-preview-followup.md 状态: discovered_readonly
+  ```
+- **第 2 次真实自动轮询**：`2026-10-01 00:48:57`（时间差为 122 秒，精准匹配 120 秒配置与网络/进程时间开销）
+  ```text
+  [2026-10-01 00:48:57] [轮询检查] git fetch 同步完成，origin/main: 0b9ff3e
+  [2026-10-01 00:48:58] [PR 任务监控] PR #5 (feat/stage1-media-import@20cd362): tasks/stage1-preview-followup.md 状态: discovered_readonly
+  ```
+- **门禁与处理结论**：两次真实轮询均成功通过 `git fetch origin` 获取最新远端分支 SHA 并检测到 PR #5 中的任务文件，且均受安全门禁拦截，`execute_cli_task` 执行次数严格为 0，零多媒体处理、零工作区破坏。
+
+

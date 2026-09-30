@@ -486,3 +486,78 @@ def test_runner_two_round_request_changes_deduplication(tmp_path: Path):
                             res2 = runner.run_once()
                             assert res2 == 0
                             assert mock_exec.call_count == 1  # Still 1!
+
+
+def test_discover_pr_branch_tasks(tmp_path: Path):
+    """Verify discover_pr_branch_tasks extracts PR branch tasks and titles correctly."""
+    repo = create_git_repo(tmp_path / "repo")
+    runner = LocalTaskRunner(repo_root=repo, runner_dir=repo / ".vmv-runner")
+
+    # 1. When ref does not exist
+    with patch("subprocess.run") as mock_sub:
+        mock_sub.return_value = MagicMock(returncode=1, stdout="", stderr="")
+        assert runner.discover_pr_branch_tasks() == []
+
+    # 2. When ref exists and has task file
+    def mock_sub_run(cmd, **kwargs):
+        if "rev-parse" in cmd:
+            return MagicMock(returncode=0, stdout="20cd362cd88df183b062991a14f2ac50c9b6703f\n", stderr="")
+        elif "git" in cmd and "show" in cmd:
+            content = "# AGY 任务：阶段 1 镜头清单核对补充\n\n详情内容..."
+            return MagicMock(returncode=0, stdout=content, stderr="")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch("subprocess.run", side_effect=mock_sub_run):
+        discovered = runner.discover_pr_branch_tasks()
+        assert len(discovered) == 1
+        d = discovered[0]
+        assert d["task_id"] == "stage1-preview-followup"
+        assert d["pr_number"] == 5
+        assert d["branch"] == "feat/stage1-media-import"
+        assert d["remote_sha"] == "20cd362cd88df183b062991a14f2ac50c9b6703f"
+        assert d["task_path"] == "tasks/stage1-preview-followup.md"
+        assert d["title"] == "AGY 任务：阶段 1 镜头清单核对补充"
+
+
+def test_run_once_pr_branch_task_discovery_and_readonly_safety_gate(tmp_path: Path):
+    """Verify PR branch tasks are safely discovered and held in readonly state without triggering CLI."""
+    repo = create_git_repo(tmp_path / "repo")
+    runner = LocalTaskRunner(repo_root=repo, runner_dir=repo / ".vmv-runner")
+
+    mock_pr_task = [{
+        "task_id": "stage1-preview-followup",
+        "pr_number": 5,
+        "branch": "feat/stage1-media-import",
+        "remote_sha": "20cd362cd88df183b062991a14f2ac50c9b6703f",
+        "task_path": "tasks/stage1-preview-followup.md",
+        "title": "AGY 任务：阶段 1 镜头清单核对补充",
+    }]
+
+    with patch.object(runner, "fetch_remote_main", return_value=(True, "")):
+        with patch.object(runner, "get_origin_main_sha", return_value="main_sha"):
+            with patch.object(runner, "load_queue_tasks", return_value=([], None)):
+                with patch.object(runner, "discover_pr_branch_tasks", return_value=mock_pr_task):
+                    with patch.object(runner, "execute_cli_task") as mock_exec:
+                        # First run: discovers PR #5 task
+                        exit_code = runner.run_once()
+                        assert exit_code == 0
+                        assert mock_exec.call_count == 0  # Strict gate: NEVER execute video processing CLI!
+
+                        loaded = runner.load_state()
+                        task_key = "stage1-preview-followup:pr5"
+                        assert task_key in loaded
+                        st = loaded[task_key]
+                        assert st.status == "discovered_readonly"
+                        assert st.pr_number == 5
+                        assert st.head_sha == "20cd362cd88df183b062991a14f2ac50c9b6703f"
+                        assert st.attempt == 0
+                        assert st.pid is None
+                        assert "安全门禁" in (st.last_error or "")
+
+                        # Second run: duplicate check across cycles does NOT re-dispatch or change status
+                        exit_code2 = runner.run_once()
+                        assert exit_code2 == 0
+                        assert mock_exec.call_count == 0  # Still 0!
+                        loaded2 = runner.load_state()
+                        assert loaded2[task_key].status == "discovered_readonly"
+

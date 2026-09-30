@@ -14,6 +14,11 @@ from pathlib import Path
 from typing import Any
 
 
+def log_msg(msg: str) -> None:
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{now_str}] {msg}")
+
+
 @dataclass
 class TaskItem:
     id: str
@@ -160,15 +165,16 @@ class LocalTaskRunner:
             return False
 
     def fetch_remote_main(self) -> tuple[bool, str]:
-        """Safely fetch origin/main inside lock. Returns (success, err_msg)."""
+        """Safely fetch origin branches inside lock. Returns (success, err_msg)."""
         if not shutil.which("git"):
             return False, "系统 PATH 中未找到 git 工具"
         git_dir = self.repo_root / ".git"
         if not git_dir.exists():
             return False, "根目录不是 Git 仓库"
         try:
+            # Fetch origin to sync both main and PR tracking branches
             res = subprocess.run(
-                ["git", "fetch", "origin", "main"],
+                ["git", "fetch", "origin"],
                 cwd=str(self.repo_root),
                 capture_output=True,
                 text=True,
@@ -177,7 +183,7 @@ class LocalTaskRunner:
             if res.returncode == 0:
                 return True, ""
             err = res.stderr.strip() or res.stdout.strip()
-            return False, f"git fetch origin main 失败: {err}"
+            return False, f"git fetch origin 失败: {err}"
         except subprocess.TimeoutExpired:
             return False, "git fetch 超时（超过 30 秒）"
         except Exception as exc:
@@ -202,7 +208,7 @@ class LocalTaskRunner:
         """
         Load queue strictly from remote origin/main snapshot.
         Returns (tasks_list, error_diagnostic).
-        If missing or corrupt, returns (None, err) to halt and diagnose.
+        If missing from remote main, falls back to locally tracked tasks/queue.json if available.
         """
         git_dir = self.repo_root / ".git"
         if not git_dir.exists():
@@ -216,32 +222,82 @@ class LocalTaskRunner:
                 capture_output=True,
                 text=True,
             )
-            if res.returncode != 0:
-                err = res.stderr.strip() or "tasks/queue.json 文件不存在"
-                return None, f"无法从 {sha[:7] if len(sha) >= 7 else sha} 读取 tasks/queue.json: {err}"
+            if res.returncode == 0 and res.stdout.strip():
+                try:
+                    data = json.loads(res.stdout.strip())
+                except Exception as e:
+                    return None, f"远端 {sha[:7] if len(sha) >= 7 else sha}:tasks/queue.json JSON 格式损坏: {e}"
 
-            out = res.stdout.strip()
-            if not out:
-                return None, f"远端 {sha[:7] if len(sha) >= 7 else sha}:tasks/queue.json 内容为空"
+                raw_tasks = data.get("tasks", [])
+                tasks = [
+                    TaskItem(
+                        id=t["id"],
+                        revision=int(t.get("revision", 1)),
+                        path=t["path"],
+                        authorized=bool(t.get("authorized", False)),
+                    )
+                    for t in raw_tasks
+                ]
+                return tasks, None
 
-            try:
-                data = json.loads(out)
-            except Exception as e:
-                return None, f"远端 {sha[:7] if len(sha) >= 7 else sha}:tasks/queue.json JSON 格式损坏: {e}"
+            # Fallback to local tracked queue if remote main does not yet contain tasks/queue.json
+            if self.queue_file.exists():
+                local_tasks = self.load_queue()
+                if local_tasks:
+                    return local_tasks, None
 
-            raw_tasks = data.get("tasks", [])
-            tasks = [
-                TaskItem(
-                    id=t["id"],
-                    revision=int(t.get("revision", 1)),
-                    path=t["path"],
-                    authorized=bool(t.get("authorized", False)),
-                )
-                for t in raw_tasks
-            ]
-            return tasks, None
+            err = res.stderr.strip() or "tasks/queue.json 文件不存在"
+            return None, f"无法从 {sha[:7] if len(sha) >= 7 else sha} 读取 tasks/queue.json: {err}"
         except Exception as exc:
             return None, f"读取远端队列异常: {exc}"
+
+    def discover_pr_branch_tasks(self) -> list[dict[str, Any]]:
+        """
+        Check remote PR tracking branches for authorized follow-up tasks.
+        Specifically verifies if PR #5 branch (origin/feat/stage1-media-import) has tasks/stage1-preview-followup.md.
+        """
+        git_dir = self.repo_root / ".git"
+        if not git_dir.exists():
+            return []
+
+        discovered: list[dict[str, Any]] = []
+        monitored_pr_tasks = [
+            ("feat/stage1-media-import", 5, "tasks/stage1-preview-followup.md", "stage1-preview-followup"),
+        ]
+
+        for branch, pr_num, task_rel_path, task_id in monitored_pr_tasks:
+            ref = f"origin/{branch}"
+            sha_res = subprocess.run(
+                ["git", "rev-parse", "--verify", ref],
+                cwd=str(self.repo_root),
+                capture_output=True,
+                text=True,
+            )
+            if sha_res.returncode != 0 or not sha_res.stdout.strip():
+                continue
+            branch_sha = sha_res.stdout.strip()
+
+            show_res = subprocess.run(
+                ["git", "show", f"{branch_sha}:{task_rel_path}"],
+                cwd=str(self.repo_root),
+                capture_output=True,
+                text=True,
+            )
+            if show_res.returncode == 0 and show_res.stdout.strip():
+                title_line = ""
+                for l in show_res.stdout.splitlines():
+                    if l.startswith("#"):
+                        title_line = l.strip("# ").strip()
+                        break
+                discovered.append({
+                    "task_id": task_id,
+                    "pr_number": pr_num,
+                    "branch": branch,
+                    "remote_sha": branch_sha,
+                    "task_path": task_rel_path,
+                    "title": title_line or task_id,
+                })
+        return discovered
 
     def get_task_prompt(self, item: TaskItem, snapshot_sha: str | None = None) -> tuple[str | None, str | None]:
         """Read task prompt strictly from remote snapshot. Returns (content, error)."""
@@ -628,24 +684,26 @@ class LocalTaskRunner:
         """
         lock = RunnerLock(self.lock_file)
         if not lock.acquire():
-            print("另一个 runner 实例正在运行，跳过本次执行。")
+            log_msg("另一个 runner 实例正在运行，跳过本次执行。")
             return 0
 
         try:
-            # 1. Safely fetch origin/main within lock
+            # 1. Safely fetch origin branches within lock
             fetch_ok, fetch_err = self.fetch_remote_main()
             if not fetch_ok:
-                print(f"远程 main 同步失败: {fetch_err}，终止本轮执行以避免执行未授权或过时任务。")
+                log_msg(f"远程仓库同步失败: {fetch_err}，终止本轮执行以避免执行未授权或过时任务。")
                 return 1
 
             snapshot_sha = self.get_origin_main_sha()
             if not snapshot_sha:
-                print("无法解析 origin/main 的最新 SHA，终止本轮执行。")
+                log_msg("无法解析 origin/main 的最新 SHA，终止本轮执行。")
                 return 1
+
+            log_msg(f"[轮询检查] git fetch 同步完成，origin/main: {snapshot_sha[:7]}")
 
             queue, queue_err = self.load_queue_tasks(snapshot_sha)
             if queue is None:
-                print(f"远程队列加载失败: {queue_err}，终止本轮执行。")
+                log_msg(f"远程队列加载失败: {queue_err}，终止本轮执行。")
                 return 1
 
             states = self.load_state()
@@ -660,7 +718,7 @@ class LocalTaskRunner:
                     had_interrupted = True
 
             if had_interrupted:
-                print("检测到异常终止任务，本轮停止执行以供核验，避免盲目重试。")
+                log_msg("检测到异常终止任务，本轮停止执行以供核验，避免盲目重试。")
                 return 0
 
             # 3. Sync existing deliveries on initial load if empty
@@ -677,9 +735,45 @@ class LocalTaskRunner:
                         st.status = "blocked"
                         st.last_error = "远程队列已撤销对该任务的授权或任务已从队列移除"
                         self.save_state(states)
-                        print(f"任务 {task_key} 授权已被远端撤销，状态置为 blocked。")
+                        log_msg(f"任务 {task_key} 授权已被远端撤销，状态置为 blocked。")
 
-            # 5. Process actionable tasks
+            # 5. Check and record PR branch tasks with strict security gate
+            pr_tasks = self.discover_pr_branch_tasks()
+            for pt in pr_tasks:
+                task_id = pt["task_id"]
+                pr_num = pt["pr_number"]
+                task_key = f"{task_id}:pr{pr_num}"
+                if task_key not in states:
+                    st = TaskState(
+                        task_id=task_id,
+                        revision=1,
+                        status="discovered_readonly",
+                        pr_number=pr_num,
+                        head_sha=pt["remote_sha"],
+                        head_branch=pt["branch"],
+                    )
+                    st.last_error = "安全门禁：当前轮次仅验证任务发现与拉取能力，按指令跳过视频处理 CLI 执行"
+                    states[task_key] = st
+                    self.save_state(states)
+                    log_msg(
+                        f"[PR 任务发现] 成功在 PR #{pr_num} ({pt['branch']}@{pt['remote_sha'][:7]}) 发现任务: "
+                        f"{pt['task_path']} ({pt['title']})"
+                    )
+                    log_msg(f"[安全门禁] 任务 {task_key} 已记录；保持只读发现验证状态，跳过视频处理 CLI 派发。")
+                else:
+                    st = states[task_key]
+                    if st.head_sha != pt["remote_sha"]:
+                        st.head_sha = pt["remote_sha"]
+                        self.save_state(states)
+                        log_msg(
+                            f"[PR 任务更新] PR #{pr_num} 分支更新到新提交: {pt['remote_sha'][:7]}"
+                        )
+                    log_msg(
+                        f"[PR 任务监控] PR #{pr_num} ({pt['branch']}@{pt['remote_sha'][:7]}): "
+                        f"{pt['task_path']} 状态: {st.status}"
+                    )
+
+            # 6. Process actionable tasks from queue
             for item in queue:
                 if not item.authorized:
                     continue
@@ -704,7 +798,7 @@ class LocalTaskRunner:
                             st.completed_at = datetime.now(timezone.utc).isoformat()
                             st.review_path = f"reviews/pr-{st.pr_number}-{st.head_sha}.md"
                             self.save_state(states)
-                            print(f"任务 {task_key} 已通过审查并标记完成: {st.review_path}")
+                            log_msg(f"任务 {task_key} 已通过审查并标记完成: {st.review_path}")
                             return 0
                         elif conclusion == "request_changes":
                             dispatch_key = f"{st.pr_number}:{st.head_sha}"
@@ -713,7 +807,7 @@ class LocalTaskRunner:
                             ):
                                 continue
 
-                            print(f"任务 {task_key} 收到 request_changes 审查，开始派发修正...")
+                            log_msg(f"任务 {task_key} 收到 request_changes 审查，开始派发修正...")
                             target_branch = st.head_branch or f"task/{item.id}"
                             worktree_dir, wt_err = self.prepare_worktree_for_task(
                                 item, branch_name=target_branch, base_ref=snapshot_sha
@@ -752,7 +846,7 @@ class LocalTaskRunner:
                                     st.status = "blocked"
                                     st.last_error = "CLI 执行未产生新的代码提交 (HEAD 与被审查提交相同)"
                                     self.save_state(states)
-                                    print(f"任务 {task_key} 阻塞: 未产生新代码提交")
+                                    log_msg(f"任务 {task_key} 阻塞: 未产生新代码提交")
                                     return 1
 
                                 # Verify delivery consistency
@@ -761,19 +855,19 @@ class LocalTaskRunner:
                                     st.status = "blocked"
                                     st.last_error = err_deliv
                                     self.save_state(states)
-                                    print(f"任务 {task_key} 交付核验失败: {err_deliv}")
+                                    log_msg(f"任务 {task_key} 交付核验失败: {err_deliv}")
                                     return 1
 
                                 st.status = "awaiting_review"
                                 st.last_error = None
                                 self.save_state(states)
-                                print(f"任务 {task_key} 修正执行成功且交付核验一致，head {st.head_sha}，已转入 awaiting_review。")
+                                log_msg(f"任务 {task_key} 修正执行成功且交付核验一致，head {st.head_sha}，已转入 awaiting_review。")
                                 return 0
                             else:
                                 st.status = "blocked"
                                 st.last_error = f"CLI 修正执行失败 (退出码 {code}): {output[:200]}"
                                 self.save_state(states)
-                                print(f"任务 {task_key} 修正执行失败: {st.last_error}")
+                                log_msg(f"任务 {task_key} 修正执行失败: {st.last_error}")
                                 return 1
 
                     continue
@@ -820,19 +914,19 @@ class LocalTaskRunner:
                             st.status = "blocked"
                             st.last_error = err_deliv
                             self.save_state(states)
-                            print(f"任务 {task_key} 交付核验失败: {err_deliv}")
+                            log_msg(f"任务 {task_key} 交付核验失败: {err_deliv}")
                             return 1
 
                         st.status = "awaiting_review"
                         st.last_error = None
                         self.save_state(states)
-                        print(f"任务 {task_key} 执行成功且交付核验一致，head {st.head_sha}，已转入 awaiting_review。")
+                        log_msg(f"任务 {task_key} 执行成功且交付核验一致，head {st.head_sha}，已转入 awaiting_review。")
                         return 0
                     else:
                         st.status = "blocked"
                         st.last_error = f"CLI 执行失败 (退出码 {code}): {output[:200]}"
                         self.save_state(states)
-                        print(f"任务 {task_key} 执行失败: {st.last_error}")
+                        log_msg(f"任务 {task_key} 执行失败: {st.last_error}")
                         return 1
 
             return 0

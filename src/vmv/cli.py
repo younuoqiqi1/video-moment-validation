@@ -105,9 +105,16 @@ def main(argv: list[str] | None = None) -> int:
                 for k, v in states.items():
                     print(f"  - [{k}] 状态: {v.status}, 尝试次数: {v.attempt}, 启动时间: {v.started_at or '-'}")
                     if v.last_error:
-                        print(f"    错误: {v.last_error}")
+                        print(f"    说明/门禁: {v.last_error}")
             else:
                 print("\n本地暂无持久化任务状态记录。")
+
+            pr_tasks = runner.discover_pr_branch_tasks()
+            if pr_tasks:
+                print("\n已发现的 PR 分支任务:")
+                for pt in pr_tasks:
+                    print(f"  - PR #{pt['pr_number']} ({pt['branch']}@{pt['remote_sha'][:7]}): {pt['task_path']}")
+                    print(f"    标题: {pt['title']}")
             return 0
 
         elif action == "install":
