@@ -520,7 +520,7 @@ def test_discover_pr_branch_tasks(tmp_path: Path):
 
 
 def test_run_once_pr_branch_task_discovery_and_readonly_safety_gate(tmp_path: Path):
-    """Verify PR branch tasks are safely discovered and held in readonly state without triggering CLI."""
+    """Only the pinned, authorized PR #5 task is dispatched, once, in an isolated worktree."""
     repo = create_git_repo(tmp_path / "repo")
     runner = LocalTaskRunner(repo_root=repo, runner_dir=repo / ".vmv-runner")
 
@@ -532,32 +532,59 @@ def test_run_once_pr_branch_task_discovery_and_readonly_safety_gate(tmp_path: Pa
         "task_path": "tasks/stage1-preview-followup.md",
         "title": "AGY 任务：阶段 1 镜头清单核对补充",
     }]
+    authorized_item = TaskItem(
+        id="stage1-preview-followup",
+        revision=1,
+        path="tasks/stage1-preview-followup.md",
+        authorized=True,
+    )
 
     with patch.object(runner, "fetch_remote_main", return_value=(True, "")):
         with patch.object(runner, "get_origin_main_sha", return_value="main_sha"):
             with patch.object(runner, "load_queue_tasks", return_value=([], None)):
                 with patch.object(runner, "discover_pr_branch_tasks", return_value=mock_pr_task):
-                    with patch.object(runner, "execute_cli_task") as mock_exec:
-                        # First run: discovers PR #5 task
-                        exit_code = runner.run_once()
-                        assert exit_code == 0
-                        assert mock_exec.call_count == 0  # Strict gate: NEVER execute video processing CLI!
+                    with patch.object(
+                        runner,
+                        "resolve_authorized_pr_task",
+                        return_value=(authorized_item, "已授权任务内容", None),
+                    ):
+                        with patch.object(runner, "prepare_worktree_for_task", return_value=(tmp_path, None)):
+                            with patch.object(runner, "get_remote_branch_sha", return_value=mock_pr_task[0]["remote_sha"]):
+                                with patch.object(
+                                    runner,
+                                    "_get_worktree_head_sha",
+                                    side_effect=[mock_pr_task[0]["remote_sha"], "new_code_sha"],
+                                ):
+                                    with patch.object(runner, "_verify_delivery", return_value=(True, None)):
+                                        with patch.object(
+                                            runner, "execute_cli_task", return_value=(0, "已完成", 4321)
+                                        ) as mock_exec:
+                                            with patch.object(runner, "find_matching_review", return_value=(None, None)):
+                                                # First poll starts the task and records delivery for review.
+                                                exit_code = runner.run_once()
+                                                assert exit_code == 0
+                                                assert mock_exec.call_count == 1
+                                                assert mock_exec.call_args.args[0] == authorized_item
+                                                assert "已授权任务内容" in mock_exec.call_args.args[1]
+                                                loaded = runner.load_state()
+                                                task_key = "stage1-preview-followup:r1"
+                                                assert loaded[task_key].status == "awaiting_review"
+                                                assert loaded[task_key].pr_number == 5
+                                                assert loaded[task_key].head_sha == mock_pr_task[0]["remote_sha"]
+                                                assert loaded[task_key].attempt == 1
 
-                        loaded = runner.load_state()
-                        task_key = "stage1-preview-followup:pr5"
-                        assert task_key in loaded
-                        st = loaded[task_key]
-                        assert st.status == "discovered_readonly"
-                        assert st.pr_number == 5
-                        assert st.head_sha == "20cd362cd88df183b062991a14f2ac50c9b6703f"
-                        assert st.attempt == 0
-                        assert st.pid is None
-                        assert "安全门禁" in (st.last_error or "")
+                                                # With no matching review yet, the next poll waits and never repeats work.
+                                                exit_code2 = runner.run_once()
+                                                assert exit_code2 == 0
+                                                assert mock_exec.call_count == 1
 
-                        # Second run: duplicate check across cycles does NOT re-dispatch or change status
-                        exit_code2 = runner.run_once()
-                        assert exit_code2 == 0
-                        assert mock_exec.call_count == 0  # Still 0!
-                        loaded2 = runner.load_state()
-                        assert loaded2[task_key].status == "discovered_readonly"
+    # A PR task with any different identity/path is rejected before reading or dispatching it.
+    item, prompt, err = runner.resolve_authorized_pr_task({
+        **mock_pr_task[0],
+        "task_path": "tasks/other-task.md",
+    })
+    assert item is None
+    assert prompt is None
+    assert "不在明确授权白名单" in (err or "")
+
 
