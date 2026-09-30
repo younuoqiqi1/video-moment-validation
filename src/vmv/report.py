@@ -358,12 +358,12 @@ def validate_output_paths(output_json_path: Path) -> tuple[Path, Path]:
 
     try:
         resolved_json = output_json_path.resolve()
-    except (OSError, RuntimeError) as exc:
+    except (ValueError, OSError, RuntimeError) as exc:
         raise OSError(f"路径解析失败（符号链接循环或权限异常）: '{output_json_path}'，原因: {exc}")
 
     try:
         resolved_html = resolved_json.with_suffix(".html")
-    except (OSError, RuntimeError) as exc:
+    except (ValueError, OSError, RuntimeError) as exc:
         raise OSError(f"HTML 关联路径解析失败: '{output_json_path}'，原因: {exc}")
 
     if resolved_json == resolved_html:
