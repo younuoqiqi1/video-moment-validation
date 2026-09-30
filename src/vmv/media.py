@@ -1,6 +1,7 @@
 """Media probing, timecode utilities, and scene detection for Stage 1."""
 
 import hashlib
+from html import escape
 import json
 import math
 import os
@@ -431,10 +432,21 @@ def generate_summary_html(
             </tr>"""
         )
 
-    v_codec = media.video.codec if media.video else "N/A"
-    v_res = f"{media.video.width}x{media.video.height} ({media.video.aspect_ratio})" if media.video else "N/A"
-    v_fps = f"{media.video.fps} fps" if media.video else "N/A"
-    a_codec = f"{media.audio.codec} ({media.audio.channel_layout}, {media.audio.sample_rate}Hz)" if media.audio else "N/A"
+    # Media metadata can contain attacker-controlled text (for example a filename).
+    # Escape every metadata string before interpolating it into this HTML document.
+    filename = escape(media.filename, quote=True)
+    media_id = escape(media.media_id, quote=True)
+    relative_path = escape(media.relative_path, quote=True)
+    v_codec = escape(media.video.codec, quote=True) if media.video else "N/A"
+    v_res = escape(
+        f"{media.video.width}x{media.video.height} ({media.video.aspect_ratio})", quote=True
+    ) if media.video else "N/A"
+    v_fps = escape(f"{media.video.fps} fps", quote=True) if media.video else "N/A"
+    a_codec = escape(
+        f"{media.audio.codec} ({media.audio.channel_layout}, {media.audio.sample_rate}Hz)",
+        quote=True,
+    ) if media.audio else "N/A"
+    subtitle_summary = escape(media.subtitle_summary, quote=True)
 
     html_content = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -557,7 +569,7 @@ def generate_summary_html(
                 <span class="badge">PROBE PASSED</span>
             </div>
             <p style="color: var(--text-secondary); margin-top: 6px;">
-                素材: <strong>{media.filename}</strong> (ID: <code>{media.media_id}</code>)
+                素材: <strong>{filename}</strong> (ID: <code>{media_id}</code>)
             </p>
         </header>
 
@@ -580,7 +592,7 @@ def generate_summary_html(
             <div class="card">
                 <div class="card-label">字幕状态</div>
                 <div class="card-value">{len(media.subtitles)} 轨软字幕</div>
-                <div class="card-sub">{media.subtitle_summary}</div>
+                <div class="card-sub">{subtitle_summary}</div>
             </div>
         </section>
 
@@ -602,13 +614,13 @@ def generate_summary_html(
             </div>
             <div class="card">
                 <div class="card-label">素材相对路径</div>
-                <div class="card-value" style="font-size: 15px; word-break: break-all;"><code>{media.relative_path}</code></div>
+                <div class="card-value" style="font-size: 15px; word-break: break-all;"><code>{relative_path}</code></div>
                 <div class="card-sub">本地安全隔离</div>
             </div>
         </section>
 
         <h2 style="font-size: 20px; font-weight: 600; margin-top: 32px; margin-bottom: 8px;">镜头时间码清单 (前 100 项预览)</h2>
-        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;">完整清单已导出至 <code>outputs/stage1/scenes_{media.media_id}.json</code></p>
+        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;">完整清单已导出至 <code>outputs/stage1/scenes_{media_id}.json</code></p>
 
         <table>
             <thead>
