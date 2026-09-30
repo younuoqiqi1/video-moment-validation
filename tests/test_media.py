@@ -16,6 +16,7 @@ from vmv.media import (
     generate_summary_html,
     run_stage1_media_import,
     MediaProbeError,
+    MediaInfo,
     VideoStreamInfo,
 )
 
@@ -186,3 +187,31 @@ def test_run_stage1_media_import_synthetic_success(tmp_path: Path):
     html_file = output_dir / "summary.html"
     assert html_file.exists()
     assert "阶段 1 素材导入与时间码清单" in html_file.read_text(encoding="utf-8")
+
+
+def test_generate_summary_html_escapes_untrusted_media_text(tmp_path: Path):
+    """Media-derived text must stay text when rendered into the local HTML report."""
+    malicious = 'x"><script>alert(1)</script>.mp4'
+    media = MediaInfo(
+        media_id='id"><script>alert(1)</script>',
+        filename=malicious,
+        relative_path='data/input/' + malicious,
+        file_size_bytes=1,
+        file_size_mb=0.0,
+        duration_sec=1.0,
+        duration_timecode="00:00:01:00",
+        format_name="mp4",
+        video=None,
+        audio=None,
+        subtitles=[],
+        subtitle_summary='subtitle <img src=x onerror=alert(1)>',
+    )
+
+    output_html = tmp_path / "summary.html"
+    generate_summary_html(media, [], output_html)
+    rendered = output_html.read_text(encoding="utf-8")
+
+    assert "<script>alert(1)</script>" not in rendered
+    assert "<img src=x onerror=alert(1)>" not in rendered
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in rendered
+    assert "&lt;img src=x onerror=alert(1)&gt;" in rendered
