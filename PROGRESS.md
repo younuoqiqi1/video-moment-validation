@@ -32,7 +32,7 @@
 - [x] 确认 Mac 上 AGY 能实际完成一个最小任务（完成 L0 CLI 与测试套件开发，单元测试 6/6 通过）
 - [x] 安装并配置 FFmpeg、ffprobe 依赖（已成功部署到 PATH）
 - [x] 已关联并推送指定 GitHub 仓库，Codex 已验证读取
-- [ ] 实现并验证本地 AGY 自动接任务与 launchd 轮询服务（真实 CLI 与 launchd 探针实测通过；已重构 Python 离线控制器与进程检测验证；R1–R4 / A–F 审查项已彻底修复，真实临时 Git 测试与全量 37/37 项测试通过，报告见 reports/local-runner-probe.md，PR #3 处于 awaiting_review 等待 Codex 审查）
+- [ ] 实现并验证本地 AGY 自动接任务与 launchd 轮询服务（旧版只读探针曾在 Mac 运行；新版限定 PR #5 任务的代码在 Codex Linux 环境 45/45 测试通过，尚未在用户 Mac 验证服务更新与 AGY 实际启动；见 reports/local-runner-probe.md，PR #3 等待复核）
 - [ ] 确认 GPT 自动续跑能力（未接通，不承诺自动唤醒）
 - [ ] 将本地执行变更同步到 Notion（本轮仅更新仓库看板）
 
@@ -58,8 +58,8 @@
 
 - PR #1 素材下载：Codex 审查结论 `pass_with_notes`，等待用户阶段验收。
 - PR #2 阶段0修正：Codex 审查结论 `pass_with_notes`（提交 `dadcbb5`），代码复核通过，等待用户最终阶段验收。
-- PR #3 本地自动接任务：已响应 Codex 最新审查意见（`reviews/pr-3-02629fbae0cf92bec45ae7f694a343f2a5ab4451.md`），完成 R1（工作区与分支保护、禁止 -B 与 rmtree）、R2（严格 fetch 返回码校验与远程快照唯一准据）、R3（真实 PR 元数据与交付三方一致性校验、严格结论解析、异常子进程终止）、R4（纯 Python 控制器与 worker、GUI 进程检测、字节全等匹配与 launchd 清理）；全量 37/37 测试全部通过。更新原 PR #3，保持 `awaiting_review` 等待复核。
-- 保持严格门禁：不自动合并任何 PR，不越过用户授权推进视频阶段 1。
+- PR #3 本地自动接任务：已修复暂时读取 GitHub 失败后被误判为撤销授权的实际测试故障；在 Codex Linux 环境独立复核 45/45 通过。真实 PR #5 的任务文件版本与授权限定值一致。Mac 后台新版未验证，保持 `awaiting_review`。
+- 保持阶段门禁：限定在用户已授权的 PR #5 阶段 1 补充任务，不自动合并 PR，不进入阶段 2。
 
 ## 当前优先级：验证能力优先
 
