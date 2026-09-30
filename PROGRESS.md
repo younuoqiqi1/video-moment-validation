@@ -8,7 +8,7 @@
 
 | 阶段 | 权重 | 状态 | 已完成 | 你的验收入口 | 阻塞项 |
 |---|---:|---|---:|---|---|
-| 0. 项目与工具准备 | 10% | 待 AGY 修正、Codex 复核 | 未验收 | `outputs/stage0/environment.html`<br>`reports/stage0-review.md` | reviews/stage0-task.md：输出路径、错误处理与报告一致性 |
+| 0. 项目与工具准备 | 10% | 修正完成，待复核 (awaiting_review) | 准备估算 8% | `outputs/stage0/environment.html`<br>`reports/stage0-review.md` | 等待 Codex 审查 R1–R3 修正 PR |
 | 1. 素材导入与时间码清单 | 15% | 待开始 | 0% | 查看视频信息、字幕与镜头清单 | 20–30 分钟测试素材 |
 | 2. 口播稿拆段与画面需求 | 15% | 未开始 | 0% | 查看每段台词对应的检索条件 | 确认后的口播稿 |
 | 3. 候选镜头检索 | 25% | 未开始 | 0% | 每段预览最多 3 个候选镜头 | 阶段 1、2 |
@@ -56,9 +56,8 @@
 
 ## 最新审查与下一步
 
-- 当前审查状态：request_changes，任务见 [reviews/stage0-task.md](reviews/stage0-task.md)。
-- AGY 仅修正阶段0问题，提交代码、测试和 reports/ 后停在 awaiting_review。
-- 阶段0验收后按本地计划执行 L1（AGY检查点与额度续跑），不直接进入素材导入。
+- 阶段 0 R1–R3 修正已完成（对应代码提交 `8431987`），9/9 单元测试通过，已生成测试记录与审查报告，停在 awaiting_review。
+- 阶段 0 验收后按本地计划执行 L1（AGY检查点与额度续跑），不直接进入素材导入。
 - GitHub 连接已生效；自动巡检、自动唤醒和 AGY 自动拉取任务尚未接通。
 
 ## 当前优先级：验证能力优先
