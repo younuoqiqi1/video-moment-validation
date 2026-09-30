@@ -69,8 +69,9 @@ def check_environment(timeout_sec: float = 5.0) -> dict[str, Any]:
     errors: list[str] = []
 
     # 1. Python check
-    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    py_valid = sys.version_info >= (3, 12)
+    major, minor, micro = sys.version_info[0], sys.version_info[1], sys.version_info[2]
+    py_ver = f"{major}.{minor}.{micro}"
+    py_valid = (major, minor) >= (3, 12)
     tools["python"] = {
         "name": "Python",
         "required": True,
@@ -345,37 +346,301 @@ def generate_html_report(env_data: dict[str, Any]) -> str:
 """
 
 
+def validate_output_paths(output_json_path: Path) -> tuple[Path, Path]:
+    """
+    Validate that output_json_path is a .json file and distinct from HTML.
+    Raises ValueError or OSError with Chinese explanation if invalid.
+    """
+    if output_json_path.suffix.lower() != ".json":
+        raise ValueError(
+            f"输出报告路径必须以 .json 结尾（不区分大小写），实际提供: '{output_json_path}'"
+        )
+
+    try:
+        resolved_json = output_json_path.resolve()
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise OSError(f"路径解析失败（符号链接循环或权限异常）: '{output_json_path}'，原因: {exc}")
+
+    try:
+        resolved_html = resolved_json.with_suffix(".html")
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise OSError(f"HTML 关联路径解析失败: '{output_json_path}'，原因: {exc}")
+
+    if resolved_json == resolved_html:
+        raise ValueError(
+            f"JSON 与 HTML 报告路径冲突（两者完全相同）: '{resolved_json}'"
+        )
+
+    return resolved_json, resolved_html
+
+
+class ReportPublishError(OSError):
+    """Exception raised when publishing reports fails, with rollback details."""
+
+    def __init__(
+        self,
+        message: str,
+        original_error: Exception,
+        rollback_errors: list[str] | None = None,
+        preserved_backups: list[str] | None = None,
+        dangling_artifacts: list[str] | None = None,
+    ):
+        super().__init__(message)
+        self.original_error = original_error
+        self.rollback_errors = rollback_errors or []
+        self.preserved_backups = preserved_backups or []
+        self.dangling_artifacts = dangling_artifacts or []
+
+
 def write_status_reports(output_json_path: Path, env_data: dict[str, Any]) -> tuple[Path, Path]:
-    """Write both JSON and HTML status reports atomically."""
-    output_json_path = output_json_path.resolve()
-    output_json_path.parent.mkdir(parents=True, exist_ok=True)
+    """
+    Write JSON and HTML status reports with path validation and rollback protection.
+    Single-file atomic replacement with best-effort rollback on failure.
+    If rollback of a backup fails, the backup file is strictly preserved and reported.
+    Returns (target_json, target_html).
+    """
+    json_path, html_path = validate_output_paths(output_json_path)
+    parent_dir = json_path.parent
 
-    html_path = output_json_path.with_suffix(".html")
+    # 1. Ensure parent directory exists
+    try:
+        parent_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise OSError(f"无法创建输出目录: '{parent_dir}'，原因: {exc}")
 
-    # Write JSON atomically
-    tmp_json = output_json_path.with_name(f"{output_json_path.name}.tmp")
-    with open(tmp_json, "w", encoding="utf-8") as f:
-        json.dump(env_data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_json, output_json_path)
+    # 2. Write HTML to temporary file first (random temp file to prevent overwrite attacks)
+    import tempfile
 
-    # Write HTML atomically
     html_content = generate_html_report(env_data)
-    tmp_html = html_path.with_name(f"{html_path.name}.tmp")
-    with open(tmp_html, "w", encoding="utf-8") as f:
-        f.write(html_content)
-    os.replace(tmp_html, html_path)
+    tmp_html_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=parent_dir,
+            prefix=".tmp_html_",
+            suffix=".tmp",
+            delete=False,
+        ) as f_html:
+            f_html.write(html_content)
+            tmp_html_path = Path(f_html.name)
+    except OSError as exc:
+        raise OSError(f"创建或写入临时 HTML 报告失败: '{html_path}'，原因: {exc}")
 
-    return output_json_path, html_path
+    # 3. Write JSON to temporary file
+    tmp_json_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=parent_dir,
+            prefix=".tmp_json_",
+            suffix=".tmp",
+            delete=False,
+        ) as f_json:
+            json.dump(env_data, f_json, ensure_ascii=False, indent=2)
+            tmp_json_path = Path(f_json.name)
+    except OSError as exc:
+        if tmp_html_path and tmp_html_path.exists():
+            try:
+                tmp_html_path.unlink()
+            except OSError:
+                pass
+        raise OSError(f"创建或写入临时 JSON 报告失败: '{json_path}'，原因: {exc}")
+
+    # 4. Check pre-existence of target files to allow transactional rollback without corrupting pre-existing user files
+    html_existed = html_path.exists()
+    json_existed = json_path.exists()
+
+    bak_html: Path | None = None
+    if html_existed and html_path.is_file():
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=parent_dir, prefix=".bak_html_", suffix=".bak", delete=False
+            ) as f_bak:
+                bak_html = Path(f_bak.name)
+            shutil.copy2(html_path, bak_html)
+        except OSError as exc:
+            for p in (tmp_html_path, tmp_json_path):
+                if p and p.exists():
+                    try:
+                        p.unlink()
+                    except OSError:
+                        pass
+            raise OSError(f"备份既有 HTML 报告失败: '{html_path}'，原因: {exc}")
+
+    bak_json: Path | None = None
+    if json_existed and json_path.is_file():
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=parent_dir, prefix=".bak_json_", suffix=".bak", delete=False
+            ) as f_bak:
+                bak_json = Path(f_bak.name)
+            shutil.copy2(json_path, bak_json)
+        except OSError as exc:
+            for p in (tmp_html_path, tmp_json_path, bak_html):
+                if p and p.exists():
+                    try:
+                        p.unlink()
+                    except OSError:
+                        pass
+            raise OSError(f"备份既有 JSON 报告失败: '{json_path}'，原因: {exc}")
+
+    # 5. Dual publish with rollback protection
+    html_published = False
+    json_published = False
+    rollback_errors: list[str] = []
+    preserved_backups: list[str] = []
+    dangling_artifacts: list[str] = []
+
+    try:
+        os.replace(tmp_html_path, html_path)
+        html_published = True
+        tmp_html_path = None
+
+        os.replace(tmp_json_path, json_path)
+        json_published = True
+        tmp_json_path = None
+
+        # Success! Clean up backup files
+        if bak_html and bak_html.exists():
+            try:
+                bak_html.unlink()
+            except OSError:
+                pass
+        if bak_json and bak_json.exists():
+            try:
+                bak_json.unlink()
+            except OSError:
+                pass
+
+        return json_path, html_path
+
+    except Exception as exc:
+        # ROLLBACK: 单文件原子替换，失败时尽力回滚；回滚失败保留备份并报告
+        # 1. 清理未被替换的临时生成文件
+        for p in (tmp_html_path, tmp_json_path):
+            if p and p.exists():
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+
+        # 2. 回滚 HTML: 若存在旧文件备份则尝试恢复；若为本次新发布则尝试撤回删除
+        if html_published:
+            if bak_html and bak_html.exists():
+                try:
+                    os.replace(bak_html, html_path)
+                    bak_html = None  # 恢复成功，旧文件已归位
+                except OSError as restore_err:
+                    preserved_backups.append(str(bak_html))
+                    dangling_artifacts.append(str(html_path))
+                    rollback_errors.append(
+                        f"还原旧 HTML 报告失败: 目标 '{html_path}' 可能残留本次生成内容，原始备份已安全保留在 '{bak_html}'，恢复错误: {restore_err}"
+                    )
+            elif not html_existed and html_path.exists():
+                try:
+                    html_path.unlink()
+                except OSError as unlink_err:
+                    dangling_artifacts.append(str(html_path))
+                    rollback_errors.append(
+                        f"撤回新发布的 HTML 报告失败: 残留文件 '{html_path}'，撤回错误: {unlink_err}"
+                    )
+
+        # 3. 回滚 JSON: 若存在旧文件备份则尝试恢复；若为本次新发布则尝试撤回删除
+        if json_published:
+            if bak_json and bak_json.exists():
+                try:
+                    os.replace(bak_json, json_path)
+                    bak_json = None  # 恢复成功，旧文件已归位
+                except OSError as restore_err:
+                    preserved_backups.append(str(bak_json))
+                    dangling_artifacts.append(str(json_path))
+                    rollback_errors.append(
+                        f"还原旧 JSON 报告失败: 目标 '{json_path}' 可能残留本次生成内容，原始备份已安全保留在 '{bak_json}'，恢复错误: {restore_err}"
+                    )
+            elif not json_existed and json_path.exists():
+                try:
+                    json_path.unlink()
+                except OSError as unlink_err:
+                    dangling_artifacts.append(str(json_path))
+                    rollback_errors.append(
+                        f"撤回新发布的 JSON 报告失败: 残留文件 '{json_path}'，撤回错误: {unlink_err}"
+                    )
+
+        # 4. 清理未受保护的剩余临时备份（恢复失败的备份已被加入 preserved_backups，严禁删除）
+        if bak_html and bak_html.exists() and str(bak_html) not in preserved_backups:
+            try:
+                bak_html.unlink()
+            except OSError:
+                pass
+        if bak_json and bak_json.exists() and str(bak_json) not in preserved_backups:
+            try:
+                bak_json.unlink()
+            except OSError:
+                pass
+
+        err_parts = [f"发布报告失败: {exc}"]
+        if rollback_errors:
+            err_parts.append("回滚发生异常: " + "；".join(rollback_errors))
+
+        raise ReportPublishError(
+            "；".join(err_parts),
+            original_error=exc,
+            rollback_errors=rollback_errors,
+            preserved_backups=preserved_backups,
+            dangling_artifacts=dangling_artifacts,
+        )
 
 
 def run_status_stage(output_json_path: Path, timeout_sec: float = 5.0) -> StageResult:
     """Execute Stage 0 status check and produce reports."""
-    env_data = check_environment(timeout_sec=timeout_sec)
-    json_path, html_path = write_status_reports(output_json_path, env_data)
+    # 1. Validate output path before performing probes or creating files
+    try:
+        target_json, target_html = validate_output_paths(output_json_path)
+    except (ValueError, OSError, RuntimeError) as exc:
+        return StageResult(
+            stage="stage0_environment",
+            status="failed",
+            artifacts=[],
+            errors=[f"输出路径校验未通过: {exc}"],
+            details={
+                "error_type": "invalid_path",
+                "overall_status": "failed",
+                "errors": [f"输出路径校验未通过: {exc}"],
+            },
+        )
 
-    status = env_data["overall_status"]
-    artifacts = [str(json_path), str(html_path)]
-    errors = env_data["errors"]
+    # 2. Check environment
+    env_data = check_environment(timeout_sec=timeout_sec)
+
+    # 3. Write status reports
+    artifacts: list[str] = []
+    write_error: str | None = None
+    try:
+        json_path, html_path = write_status_reports(target_json, env_data)
+        artifacts = [str(json_path), str(html_path)]
+    except (OSError, ValueError, RuntimeError) as exc:
+        write_error = f"文件系统异常: {exc}"
+        if isinstance(exc, ReportPublishError):
+            if exc.rollback_errors:
+                env_data["rollback_errors"] = exc.rollback_errors
+            if exc.preserved_backups:
+                env_data["preserved_backups"] = exc.preserved_backups
+            if exc.dangling_artifacts:
+                env_data["dangling_artifacts"] = exc.dangling_artifacts
+
+    errors = list(env_data.get("errors", []))
+    if write_error:
+        errors.append(write_error)
+        env_data["overall_status"] = "failed"
+        env_data["errors"] = errors
+        env_data["report_generation_status"] = "failed"
+        env_data["report_generation_error"] = write_error
+        artifacts = []
+        status = "failed"
+    else:
+        status = env_data["overall_status"]
 
     return StageResult(
         stage="stage0_environment",
