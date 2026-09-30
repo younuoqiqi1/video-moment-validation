@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "stage0-fixes",
+      "revision": 1,
+      "path": "reviews/stage0-task.md",
+      "authorized": true
+    }
+  ]
+}
