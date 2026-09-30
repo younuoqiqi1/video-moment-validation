@@ -2,13 +2,13 @@
 
 更新时间：2026-09-30（Asia/Shanghai）；执行方式已调整为 Mac 本地 AGY
 
-## 总体完成度：8%（项目准备估算；阶段 0 待修正复核）
+## 总体完成度：8%（项目准备估算；阶段 0 代码已复核，待用户验收）
 
-8% 是项目准备估算，不是视频功能完成率。环境 CLI 已实现；Mac 工具状态由 AGY 报告通过，Codex 已读取代码并发现需修正项。镜头检索、TTS、成片尚未实现。阶段验收通过后按权重计入完成度。
+8% 是项目准备估算，不是视频功能完成率。环境 CLI 已实现；Mac 工具状态由 AGY 报告通过，Codex 已完成阶段 0 复核 (pass_with_notes)。镜头检索、TTS、成片尚未实现。阶段验收通过后按权重计入完成度。
 
 | 阶段 | 权重 | 状态 | 已完成 | 你的验收入口 | 阻塞项 |
 |---|---:|---|---:|---|---|
-| 0. 项目与工具准备 | 10% | 待 AGY 修正、Codex 复核 | 未验收 | `outputs/stage0/environment.html`<br>`reports/stage0-review.md` | reviews/stage0-task.md：输出路径、错误处理与报告一致性 |
+| 0. 项目与工具准备 | 10% | 代码已复核、待用户验收 (pass_with_notes) | 未验收 | `outputs/stage0/environment.html`<br>`reports/stage0-review.md` | PR #2 已通过复核，待用户在 Mac 本地进行最终阶段验收 |
 | 1. 素材导入与时间码清单 | 15% | 待开始 | 0% | 查看视频信息、字幕与镜头清单 | 20–30 分钟测试素材 |
 | 2. 口播稿拆段与画面需求 | 15% | 未开始 | 0% | 查看每段台词对应的检索条件 | 确认后的口播稿 |
 | 3. 候选镜头检索 | 25% | 未开始 | 0% | 每段预览最多 3 个候选镜头 | 阶段 1、2 |
@@ -32,7 +32,7 @@
 - [x] 确认 Mac 上 AGY 能实际完成一个最小任务（完成 L0 CLI 与测试套件开发，单元测试 6/6 通过）
 - [x] 安装并配置 FFmpeg、ffprobe 依赖（已成功部署到 PATH）
 - [x] 已关联并推送指定 GitHub 仓库，Codex 已验证读取
-- [ ] 实现并验证 AGY 额度恢复续跑（尚未开发）
+- [ ] 实现并验证本地 AGY 自动接任务与 launchd 轮询服务（真实 CLI 与 launchd 探针实测通过；已重构 Python 离线控制器与进程检测验证；R1–R4 / A–F 审查项已彻底修复，真实临时 Git 测试与全量 37/37 项测试通过，报告见 reports/local-runner-probe.md，PR #3 处于 awaiting_review 等待 Codex 审查）
 - [ ] 确认 GPT 自动续跑能力（未接通，不承诺自动唤醒）
 - [ ] 将本地执行变更同步到 Notion（本轮仅更新仓库看板）
 
@@ -56,10 +56,10 @@
 
 ## 最新审查与下一步
 
-- 当前审查状态：request_changes，任务见 [reviews/stage0-task.md](reviews/stage0-task.md)。
-- AGY 仅修正阶段0问题，提交代码、测试和 reports/ 后停在 awaiting_review。
-- 阶段0验收后按本地计划执行 L1（AGY检查点与额度续跑），不直接进入素材导入。
-- GitHub 连接已生效；自动巡检、自动唤醒和 AGY 自动拉取任务尚未接通。
+- PR #1 素材下载：Codex 审查结论 `pass_with_notes`，等待用户阶段验收。
+- PR #2 阶段0修正：Codex 审查结论 `pass_with_notes`（提交 `dadcbb5`），代码复核通过，等待用户最终阶段验收。
+- PR #3 本地自动接任务：已响应 Codex 最新审查意见（`reviews/pr-3-02629fbae0cf92bec45ae7f694a343f2a5ab4451.md`），完成 R1（工作区与分支保护、禁止 -B 与 rmtree）、R2（严格 fetch 返回码校验与远程快照唯一准据）、R3（真实 PR 元数据与交付三方一致性校验、严格结论解析、异常子进程终止）、R4（纯 Python 控制器与 worker、GUI 进程检测、字节全等匹配与 launchd 清理）；全量 37/37 测试全部通过。更新原 PR #3，保持 `awaiting_review` 等待复核。
+- 保持严格门禁：不自动合并任何 PR，不越过用户授权推进视频阶段 1。
 
 ## 当前优先级：验证能力优先
 
