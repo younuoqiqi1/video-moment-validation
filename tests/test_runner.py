@@ -349,6 +349,7 @@ def test_runner_fetch_remote_unreachable_preserves_state(tmp_path: Path):
 
 def test_runner_loads_queue_from_origin_main(tmp_path: Path):
     """P1-1: Verify queue is read from origin/main:tasks/queue.json when available."""
+    (tmp_path / ".git").mkdir()
     runner = LocalTaskRunner(repo_root=tmp_path, runner_dir=tmp_path / ".vmv-runner")
     remote_queue_content = json.dumps({
         "version": 1,
@@ -493,5 +494,135 @@ def test_runner_interrupted_stops_cycle_without_rerun(tmp_path: Path):
 
             loaded = runner.load_state()
             assert loaded["crashed-task:r1"].status == "interrupted"
+
+
+def test_runner_two_round_request_changes_deduplication(tmp_path: Path):
+    """P1-2/D: Verify across two run_once cycles from clean state that CLI is only dispatched once."""
+    reviews_dir = tmp_path / "reviews"
+    reviews_dir.mkdir(parents=True)
+    review_file = reviews_dir / "pr-2-target_sha.md"
+    review_file.write_text("结论：request_changes\n必须修正", encoding="utf-8")
+
+    tasks_dir = tmp_path / "tasks"
+    tasks_dir.mkdir(parents=True)
+    queue_file = tasks_dir / "queue.json"
+    queue_file.write_text(
+        json.dumps({
+            "version": 1,
+            "tasks": [
+                {"id": "fix-task", "revision": 1, "path": "tasks/f.md", "authorized": True}
+            ]
+        }),
+        encoding="utf-8"
+    )
+
+    runner = LocalTaskRunner(repo_root=tmp_path, runner_dir=tmp_path / ".vmv-runner")
+    # Clean initial state with NO pre-filled dispatched tags
+    states = {
+        "fix-task:r1": TaskState(
+            task_id="fix-task",
+            revision=1,
+            status="awaiting_review",
+            pr_number=2,
+            head_sha="target_sha",
+            attempt=1,
+        )
+    }
+    runner.save_state(states)
+
+    # Round 1: CLI returns 0, but HEAD is unchanged (simulating no new commit produced)
+    with patch.object(runner, "execute_cli_task", return_value=(0, "ok", 4321)) as mock_exec:
+        with patch.object(runner, "_get_worktree_head_sha", return_value="target_sha"):
+            res1 = runner.run_once()
+            assert res1 == 1  # Blocked due to unchanged HEAD
+            assert mock_exec.call_count == 1
+            loaded1 = runner.load_state()
+            assert "2:target_sha" in loaded1["fix-task:r1"].dispatched_reviews
+            assert loaded1["fix-task:r1"].status == "blocked"
+
+            # Round 2: Re-run run_once; even if review is still request_changes, CLI must NOT be dispatched again!
+            res2 = runner.run_once()
+            assert res2 == 0
+            assert mock_exec.call_count == 1  # Total calls still exactly 1!
+
+
+def test_runner_live_pid_saved_during_communicate(tmp_path: Path):
+    """P1-3/E: Verify st.pid is written to state.json in real-time before communicate finishes."""
+    runner = LocalTaskRunner(repo_root=tmp_path, runner_dir=tmp_path / ".vmv-runner")
+    task_item = TaskItem(id="live-pid-task", revision=1, path="tasks/t.md", authorized=True)
+
+    captured_pid_during_communicate = None
+
+    def fake_communicate(timeout=None):
+        nonlocal captured_pid_during_communicate
+        loaded = runner.load_state()
+        st = loaded.get("live-pid-task:r1")
+        if st:
+            captured_pid_during_communicate = st.pid
+        return "stdout", ""
+
+    states = {
+        "live-pid-task:r1": TaskState(
+            task_id="live-pid-task",
+            revision=1,
+            status="ready",
+        )
+    }
+    runner.save_state(states)
+
+    with patch("shutil.which", return_value="/usr/local/bin/agy"):
+        with patch("subprocess.Popen") as mock_popen:
+            mock_proc = MagicMock()
+            mock_proc.pid = 88888
+            mock_proc.returncode = 0
+            mock_proc.communicate = fake_communicate
+            mock_popen.return_value = mock_proc
+
+            tasks_dir = tmp_path / "tasks"
+            tasks_dir.mkdir(parents=True)
+            (tasks_dir / "t.md").write_text("Prompt", encoding="utf-8")
+            (tasks_dir / "queue.json").write_text(
+                json.dumps({"version": 1, "tasks": [{"id": "live-pid-task", "revision": 1, "path": "tasks/t.md", "authorized": True}]}),
+                encoding="utf-8",
+            )
+
+            code = runner.run_once()
+            assert code == 0
+            assert captured_pid_during_communicate == 88888
+
+
+def test_runner_corrupt_remote_queue_does_not_execute_local(tmp_path: Path):
+    """B: Corrupted remote queue must return empty tasks and not execute uncommitted local drafts."""
+    (tmp_path / ".git").mkdir()
+    runner = LocalTaskRunner(repo_root=tmp_path, runner_dir=tmp_path / ".vmv-runner")
+
+    # Local draft exists with authorized task
+    tasks_dir = tmp_path / "tasks"
+    tasks_dir.mkdir(parents=True)
+    (tasks_dir / "queue.json").write_text(
+        json.dumps({"version": 1, "tasks": [{"id": "unauth-local", "revision": 1, "path": "tasks/u.md", "authorized": True}]}),
+        encoding="utf-8",
+    )
+
+    # Remote returns invalid JSON
+    def mock_sub_run(cmd, *args, **kwargs):
+        if "origin/main:tasks/queue.json" in cmd:
+            return MagicMock(returncode=0, stdout="{CORRUPTED_JSON", stderr="")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch("subprocess.run", side_effect=mock_sub_run):
+        tasks = runner.load_queue_tasks()
+        assert tasks == []  # Must NOT fallback to local queue!
+
+
+def test_runner_parse_review_conclusion_exact_match():
+    """C: Verify conclusion parsing does not mistake negative words like not_pass as pass."""
+    assert LocalTaskRunner._parse_review_conclusion("结论：pass") == "pass"
+    assert LocalTaskRunner._parse_review_conclusion("- 结论：pass_with_notes") == "pass_with_notes"
+    assert LocalTaskRunner._parse_review_conclusion("结论：request_changes") == "request_changes"
+    assert LocalTaskRunner._parse_review_conclusion("结论：not_pass") == "unknown"
+    assert LocalTaskRunner._parse_review_conclusion("结论：fail") == "unknown"
+    assert LocalTaskRunner._parse_review_conclusion("结论：blocked") == "blocked"
+
 
 

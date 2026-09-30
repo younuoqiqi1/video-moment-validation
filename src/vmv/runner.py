@@ -34,6 +34,7 @@ class TaskState:
     pr_number: int | None = None
     head_sha: str | None = None
     review_path: str | None = None
+    dispatched_reviews: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -145,9 +146,10 @@ class LocalTaskRunner:
             json.dump(payload, f, ensure_ascii=False, indent=2)
         os.replace(tmp_file, self.state_file)
 
-    def check_process_alive(self, pid: int | None) -> bool:
-        """Check if a given pid is still active."""
-        if not pid or pid <= 0:
+    @staticmethod
+    def check_process_alive(pid: int | None) -> bool:
+        """Check if a given pid is still active without shell injection."""
+        if not isinstance(pid, int) or pid <= 0:
             return False
         try:
             os.kill(pid, 0)
@@ -159,6 +161,8 @@ class LocalTaskRunner:
         """Safely fetch origin/main inside lock. Returns (success, err_msg)."""
         if os.environ.get("PYTEST_CURRENT_TEST"):
             return True, ""
+        if not shutil.which("git"):
+            return False, "系统 PATH 中未找到 git 工具"
         git_dir = self.repo_root / ".git"
         if not git_dir.exists():
             return True, ""
@@ -180,7 +184,14 @@ class LocalTaskRunner:
             return False, f"git fetch 异常: {exc}"
 
     def load_queue_tasks(self) -> list[TaskItem]:
-        """Load queue from origin/main:tasks/queue.json or fallback to local."""
+        """
+        Load queue strictly from origin/main:tasks/queue.json.
+        Does NOT silently fall back to uncommitted local drafts.
+        """
+        git_dir = self.repo_root / ".git"
+        if not git_dir.exists():
+            return self.load_queue()
+
         try:
             res = subprocess.run(
                 ["git", "show", "origin/main:tasks/queue.json"],
@@ -188,24 +199,34 @@ class LocalTaskRunner:
                 capture_output=True,
                 text=True,
             )
-            if res.returncode == 0 and res.stdout.strip():
-                data = json.loads(res.stdout)
-                raw_tasks = data.get("tasks", [])
-                return [
-                    TaskItem(
-                        id=t["id"],
-                        revision=int(t.get("revision", 1)),
-                        path=t["path"],
-                        authorized=bool(t.get("authorized", False)),
-                    )
-                    for t in raw_tasks
-                ]
+            if res.returncode != 0 or not res.stdout.strip():
+                return []
+
+            data = json.loads(res.stdout)
+            raw_tasks = data.get("tasks", [])
+            return [
+                TaskItem(
+                    id=t["id"],
+                    revision=int(t.get("revision", 1)),
+                    path=t["path"],
+                    authorized=bool(t.get("authorized", False)),
+                )
+                for t in raw_tasks
+            ]
         except Exception:
-            pass
-        return self.load_queue()
+            return []
 
     def get_task_prompt(self, item: TaskItem) -> str | None:
-        """Read task prompt from remote origin/main or local file."""
+        """
+        Read task prompt strictly from remote origin/main.
+        """
+        git_dir = self.repo_root / ".git"
+        if not git_dir.exists():
+            local_p = self.repo_root / item.path
+            if local_p.exists():
+                return local_p.read_text(encoding="utf-8")
+            return None
+
         try:
             res = subprocess.run(
                 ["git", "show", f"origin/main:{item.path}"],
@@ -213,15 +234,11 @@ class LocalTaskRunner:
                 capture_output=True,
                 text=True,
             )
-            if res.returncode == 0 and res.stdout:
+            if res.returncode == 0 and res.stdout.strip():
                 return res.stdout
+            return None
         except Exception:
-            pass
-
-        local_p = self.repo_root / item.path
-        if local_p.exists():
-            return local_p.read_text(encoding="utf-8")
-        return None
+            return None
 
     def prepare_worktree_for_task(self, task: TaskItem) -> tuple[Path | None, str | None]:
         """
@@ -311,7 +328,7 @@ class LocalTaskRunner:
         try:
             import urllib.request
             b = branch_name.replace("refs/heads/", "")
-            url = f"https://api.github.com/repos/younuoqiqi1/video-moment-validation/pulls?head=younuoqiqi1:{b}&state=all"
+            url = f"https://api.github.com/repos/younuoqiqi1/video-moment-validation/pulls?head=younuoqiqi1:{b}&state=open"
             req = urllib.request.Request(
                 url,
                 headers={
@@ -322,8 +339,10 @@ class LocalTaskRunner:
             )
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                if data and isinstance(data, list) and len(data) > 0:
-                    return data[0]["number"]
+                if data and isinstance(data, list):
+                    for pr in data:
+                        if pr.get("state") == "open" and not pr.get("draft", False):
+                            return pr.get("number")
         except Exception:
             pass
         return None
@@ -333,6 +352,7 @@ class LocalTaskRunner:
         task: TaskItem,
         prompt_content: str,
         cwd: Path | None = None,
+        on_started: Any = None,
     ) -> tuple[int, str, int | None]:
         """
         Execute prompt via AGY CLI using argument list in isolated cwd.
@@ -348,8 +368,8 @@ class LocalTaskRunner:
             resolved,
             "--print",
             prompt_content,
-            "--output-format",
-            "text",
+            "--model",
+            "gemini-3.8-flash-high",
             "--dangerously-skip-permissions",
         ]
 
@@ -364,12 +384,22 @@ class LocalTaskRunner:
                 text=True,
             )
             child_pid = proc.pid
+            if on_started and callable(on_started):
+                try:
+                    on_started(child_pid)
+                except Exception:
+                    pass
+
             try:
                 stdout, stderr = proc.communicate(timeout=600.0)
                 out = stdout.strip() or stderr.strip()
                 return proc.returncode, out, child_pid
             except subprocess.TimeoutExpired:
                 proc.kill()
+                try:
+                    proc.wait(timeout=5.0)
+                except Exception:
+                    pass
                 return 1, "AGY CLI 执行超时（超过 600 秒）", child_pid
         except Exception as exc:
             return 1, f"启动 AGY CLI 异常: {exc}", None
@@ -431,19 +461,21 @@ class LocalTaskRunner:
 
                 if st.status == "awaiting_review":
                     # Check if matching review exists
-                    review_file = self.find_matching_review(st)
-                    if review_file:
-                        content = review_file.read_text(encoding="utf-8")
-                        if self._is_review_passed(content):
+                    review_file, content = self.find_matching_review(st)
+                    if review_file and content:
+                        conclusion = self._parse_review_conclusion(content)
+                        if conclusion in ("pass", "pass_with_notes"):
                             st.status = "done"
                             st.completed_at = datetime.now(timezone.utc).isoformat()
-                            st.review_path = str(review_file.relative_to(self.repo_root))
+                            st.review_path = f"reviews/pr-{st.pr_number}-{st.head_sha}.md"
                             self.save_state(states)
                             print(f"任务 {task_key} 已通过审查并标记完成: {st.review_path}")
                             return 0
-                        elif "request_changes" in content:
-                            dispatch_tag = f"dispatched:{st.head_sha}"
-                            if st.last_error and dispatch_tag in st.last_error:
+                        elif conclusion == "request_changes":
+                            dispatch_key = f"{st.pr_number}:{st.head_sha}"
+                            if dispatch_key in st.dispatched_reviews or (
+                                st.last_error and f"dispatched:{st.head_sha}" in st.last_error
+                            ):
                                 # "同一提交的修正意见仅派发一次"
                                 continue
 
@@ -455,24 +487,37 @@ class LocalTaskRunner:
                                 self.save_state(states)
                                 return 1
 
+                            st.dispatched_reviews.append(dispatch_key)
                             st.status = "running"
                             st.attempt += 1
-                            st.last_error = dispatch_tag
                             st.started_at = datetime.now(timezone.utc).isoformat()
                             self.save_state(states)
 
+                            def on_started(pid: int):
+                                st.pid = pid
+                                self.save_state(states)
+
                             fix_prompt = f"Codex 对 PR #{st.pr_number} (提交 {st.head_sha}) 提出了修改意见，请仔细阅读以下审查报告并执行修正：\n\n{content}"
-                            exec_res = self.execute_cli_task(item, fix_prompt, cwd=worktree_dir)
+                            exec_res = self.execute_cli_task(
+                                item, fix_prompt, cwd=worktree_dir, on_started=on_started
+                            )
                             code = exec_res[0]
                             output = exec_res[1]
                             child_pid = exec_res[2] if len(exec_res) > 2 else None
                             st.pid = child_pid
 
                             if code == 0:
-                                head_sha = self._get_worktree_head_sha(worktree_dir)
+                                new_head = self._get_worktree_head_sha(worktree_dir)
+                                if new_head and st.head_sha and new_head == st.head_sha:
+                                    st.status = "blocked"
+                                    st.last_error = "CLI 执行未产生新的代码提交 (HEAD 与被审查提交相同)"
+                                    self.save_state(states)
+                                    print(f"任务 {task_key} 阻塞: 未产生新代码提交")
+                                    return 1
+
                                 st.status = "awaiting_review"
-                                if head_sha:
-                                    st.head_sha = head_sha
+                                if new_head:
+                                    st.head_sha = new_head
                                 st.last_error = None
                                 self.save_state(states)
                                 print(f"任务 {task_key} 修正执行成功，更新 head {st.head_sha}，已转入 awaiting_review。")
@@ -487,11 +532,10 @@ class LocalTaskRunner:
                     continue
 
                 if st.status in ("ready",):
-                    # Check task file or remote task content
                     prompt_text = self.get_task_prompt(item)
                     if not prompt_text:
                         st.status = "blocked"
-                        st.last_error = f"任务文件不存在: '{item.path}'"
+                        st.last_error = f"任务文件不存在或无法从远程读取: '{item.path}'"
                         self.save_state(states)
                         return 1
 
@@ -507,7 +551,13 @@ class LocalTaskRunner:
                     st.started_at = datetime.now(timezone.utc).isoformat()
                     self.save_state(states)
 
-                    exec_res = self.execute_cli_task(item, prompt_text, cwd=worktree_dir)
+                    def on_started(pid: int):
+                        st.pid = pid
+                        self.save_state(states)
+
+                    exec_res = self.execute_cli_task(
+                        item, prompt_text, cwd=worktree_dir, on_started=on_started
+                    )
                     code = exec_res[0]
                     output = exec_res[1]
                     child_pid = exec_res[2] if len(exec_res) > 2 else None
@@ -536,14 +586,26 @@ class LocalTaskRunner:
             lock.release()
 
     @staticmethod
-    def _is_review_passed(review_text: str) -> bool:
-        """Check if review indicates pass or pass_with_notes."""
+    def _parse_review_conclusion(review_text: str) -> str:
+        """Parse exact conclusion: 'pass', 'pass_with_notes', 'request_changes', or 'blocked'."""
         for line in review_text.splitlines():
-            if "结论" in line or "conclusion" in line.lower():
-                line_lower = line.lower()
-                return "pass" in line_lower and "request_changes" not in line_lower
-        content_lower = review_text.lower()
-        return "pass" in content_lower and "request_changes" not in content_lower
+            line_str = line.strip()
+            if "结论" in line_str or "conclusion" in line_str.lower():
+                lower = line_str.lower()
+                if "request_changes" in lower:
+                    return "request_changes"
+                if "pass_with_notes" in lower:
+                    return "pass_with_notes"
+                if "pass" in lower and "not" not in lower and "fail" not in lower:
+                    return "pass"
+                if "blocked" in lower:
+                    return "blocked"
+        return "unknown"
+
+    @classmethod
+    def _is_review_passed(cls, review_text: str) -> bool:
+        """Check if review indicates pass or pass_with_notes."""
+        return cls._parse_review_conclusion(review_text) in ("pass", "pass_with_notes")
 
     def sync_existing_deliveries(self, states: dict[str, TaskState]) -> None:
         """
@@ -640,75 +702,45 @@ class LocalTaskRunner:
                     except Exception:
                         pass
 
-    def find_matching_review(self, st: TaskState) -> Path | None:
-        """Find a review markdown matching this task."""
-        reviews_dir = self.repo_root / "reviews"
+    def find_matching_review(self, st: TaskState) -> tuple[Path | None, str | None]:
+        """
+        Find exact matching review for PR and exact head_sha.
+        Returns (local_cached_path, content).
+        Cached in .vmv-runner/reviews/ to avoid polluting workspace.
+        """
+        if not st.pr_number or not st.head_sha:
+            return None, None
 
-        # Check local files first
-        if reviews_dir.exists():
-            if st.pr_number and st.head_sha:
-                for p in reviews_dir.glob(f"pr-{st.pr_number}-*.md"):
-                    if st.head_sha in p.name:
-                        return p
-                    try:
-                        if st.head_sha in p.read_text(encoding="utf-8"):
-                            return p
-                    except Exception:
-                        pass
-                return None
+        target_name = f"pr-{st.pr_number}-{st.head_sha}.md"
+        cached_path = self.runner_dir / "reviews" / target_name
 
-            if st.pr_number:
-                for p in reviews_dir.glob(f"pr-{st.pr_number}-*.md"):
-                    return p
+        if cached_path.exists():
+            try:
+                return cached_path, cached_path.read_text(encoding="utf-8")
+            except Exception:
+                pass
 
-            for p in reviews_dir.glob("*.md"):
-                try:
-                    text = p.read_text(encoding="utf-8")
-                    if st.task_id in text or (st.head_sha and st.head_sha in text):
-                        return p
-                except Exception:
-                    pass
+        git_dir = self.repo_root / ".git"
+        if git_dir.exists():
+            try:
+                res = subprocess.run(
+                    ["git", "show", f"origin/main:reviews/{target_name}"],
+                    cwd=str(self.repo_root),
+                    capture_output=True,
+                    text=True,
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    cached_path.parent.mkdir(parents=True, exist_ok=True)
+                    cached_path.write_text(res.stdout, encoding="utf-8")
+                    return cached_path, res.stdout
+            except Exception:
+                pass
 
-        # Check origin/main via git ls-tree if repo is git
-        if st.pr_number:
-            git_dir = self.repo_root / ".git"
-            if git_dir.exists():
-                try:
-                    ls_res = subprocess.run(
-                        ["git", "ls-tree", "--name-only", "origin/main", "reviews/"],
-                        cwd=str(self.repo_root),
-                        capture_output=True,
-                        text=True,
-                    )
-                    if ls_res.returncode == 0:
-                        matching_files = [
-                            line.strip()
-                            for line in ls_res.stdout.splitlines()
-                            if line.strip().startswith(f"reviews/pr-{st.pr_number}-")
-                        ]
-                        target_file = None
-                        if st.head_sha:
-                            for mf in matching_files:
-                                if st.head_sha in mf:
-                                    target_file = mf
-                                    break
-                        if not target_file and matching_files:
-                            target_file = matching_files[-1]
+        local_p = self.repo_root / "reviews" / target_name
+        if local_p.exists():
+            try:
+                return local_p, local_p.read_text(encoding="utf-8")
+            except Exception:
+                pass
 
-                        if target_file:
-                            res = subprocess.run(
-                                ["git", "show", f"origin/main:{target_file}"],
-                                cwd=str(self.repo_root),
-                                capture_output=True,
-                                text=True,
-                            )
-                            if res.returncode == 0 and res.stdout.strip():
-                                reviews_dir.mkdir(parents=True, exist_ok=True)
-                                fname = Path(target_file).name
-                                local_copy = reviews_dir / fname
-                                local_copy.write_text(res.stdout, encoding="utf-8")
-                                return local_copy
-                except Exception:
-                    pass
-
-        return None
+        return None, None

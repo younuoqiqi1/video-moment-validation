@@ -90,7 +90,15 @@ def install_service(
     try:
         # If already loaded, unload first
         if plist_path.exists():
-            subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
+            unload_res = subprocess.run(
+                ["launchctl", "unload", "-w", str(plist_path)],
+                capture_output=True,
+                text=True,
+            )
+            if unload_res.returncode != 0:
+                err = unload_res.stderr.strip() or unload_res.stdout.strip()
+                if "Could not find" not in err and "No such process" not in err:
+                    return False, f"安装失败: 卸载既有服务失败: {err or '退出码 ' + str(unload_res.returncode)}"
 
         with open(plist_path, "w", encoding="utf-8") as f:
             f.write(xml_content)
@@ -124,8 +132,8 @@ def stop_service() -> tuple[bool, str]:
         )
         if res.returncode != 0:
             err = res.stderr.strip() or res.stdout.strip()
-            if "Could not find" not in err and "No such process" not in err and err != "":
-                return False, f"停止后台服务失败: launchctl unload 失败: {err}"
+            if "Could not find" not in err and "No such process" not in err:
+                return False, f"停止后台服务失败: launchctl unload 失败: {err or '退出码 ' + str(res.returncode)}"
 
         try:
             plist_path.unlink()
