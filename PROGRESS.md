@@ -44,7 +44,7 @@
 - [x] 核验字幕轨道状态（确认无软字幕轨，原片为内嵌烧录硬字幕）
 - [x] 自动切分前 30 分钟（1800 秒）共 130 个镜头，导出起止时间码清单（`HH:MM:SS:FF` 广播格式）
 - [x] 产出结构化脱敏清单与沉浸式可视核对报告（`outputs/stage1/summary.html`）
-- [x] 编写自动化单元测试套件（`tests/test_media.py` 10/10 passed，全量 31/31 passed），测试媒体使用微型合成短片，不依赖大文件
+- [x] 编写自动化单元测试套件（`tests/test_media.py` 11/11 passed，全量 32/32 passed），测试媒体使用微型合成短片，不依赖大文件
 - [x] 编写技术报告 `reports/stage1-media-import.md` 与测试摘要 `reports/tests/stage1-test-summary.md`
 - [x] 保持媒体隐私隔离：视频原片保留在本地 `.gitignore` 目录，绝不提交至 Git
 
@@ -69,4 +69,4 @@
 ## 最新审查与下一步
 
 - 阶段 0：已于 2026-09-30 通过复核与用户验收，PR #2 已合并到 main。
-- 阶段 1：已在 Mac 本机执行完毕，产出素材清单与时间码列表，31/31 测试全部通过。提交 PR 并保持 `awaiting_review` 等待复核；未进入阶段 2。
+- 阶段 1：AGY 已在 Mac 本机执行并提交素材清单；Codex 修复核对 HTML 的媒体文本转义问题并新增回归测试，Linux 全量测试 32/32 通过。等待复核；未进入阶段 2。
