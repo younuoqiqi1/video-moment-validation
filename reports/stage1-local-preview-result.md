@@ -3,7 +3,8 @@
 - **执行日期**：2026-10-01（Asia/Shanghai）
 - **运行环境**：macOS (Apple Silicon), Python 3.12 虚拟环境 (static_ffmpeg / Apple Silicon 硬件加速就绪)
 - **代码提交基线**：`98ab527bcdef966e3c39f76d7377b97e0587deba` (Codex preview 实现)
-- **运行代码 SHA**：`f1e3b5f5da041a2fb68bfb4aa405696245ce6d0e` (PR #5 最新提交)
+- **运行代码 SHA**：`f1e3b5f5da041a2fb68bfb4aa405696245ce6d0e` (PR #5 最新代码提交)
+- **分支基线 SHA**：`897185614b3aaac1eee51c90c1111e345028f5bc` (PR #5 分支 HEAD)
 - **关联任务**：`tasks/stage1-codex-local-run.md`
 - **执行原则**：只运行 Codex 编写的预览程序、检查本机真实素材画面并回报脱敏结果；不修改 `src/` 或 `tests/`，不调整切分阈值，不合并 PR，不进入阶段 2。
 
@@ -145,3 +146,7 @@
    - 严格不修改 `src/` 与 `tests/`；
    - 不合并 PR，不认定阶段 1 验收通过，严禁进入阶段 2；
    - PR #5 维持 `awaiting_review` 等待复核。
+5. **本地独立执行回执**：
+   - 本地于独立 worktree `stage1-codex-local-run` 下通过环境 Python 实际执行 `vmv preview` CLI 命令，全量生成 `summary.html`、`verification.json` 以及 198 张预览抽样关键帧；
+   - 已在 PR #5 发表正式协同开工回执并附代码提交 SHA；
+   - 本轮核验已完成并推送脱敏报告，PR #5 保持 `awaiting_review` 等待 Codex 进一步优化切分算法。
