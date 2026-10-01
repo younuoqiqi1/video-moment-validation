@@ -15,6 +15,7 @@ from pathlib import Path
 
 REPO = 'younuoqiqi1/video-moment-validation'
 STAGE1_SHA = '39c48d9a87167decb3ab53d5da5d79d6e3bd9c05'
+CUT_CHECK_SHA = '6bb8f6c08fbab4bd856e86091728ebf28f036361'
 LOCAL_CONFIG = Path.home() / '.local/share/vmv-actions-runner/vmv-local.json'
 
 
@@ -76,6 +77,8 @@ def validate_task(task):
         return task
     if task['mode'] in ('stage1-preview', 'stage1-numeric') and task['pr_number'] == 5 and task['code_sha'] == STAGE1_SHA:
         return task
+    if task['mode'] == 'stage1-cut-check' and task['pr_number'] == 5 and task['code_sha'] == CUT_CHECK_SHA:
+        return task
     raise ValueError('unauthorized_task')
 
 
@@ -109,7 +112,11 @@ def post_receipt(task, result, phase):
     for key in ('completed_at', 'probe_sha256', 'statistics', 'preview_image_count',
                 'numeric_validation', 'human_visual_review', 'error_code',
                 'adjacent_scenes', 'source_scenes_sha256', 'source_media_manifest_sha256',
-                'fps', 'analyzed_duration_sec', 'checkpoint', 'blocked_at_checkpoint'):
+                'fps', 'analyzed_duration_sec', 'checkpoint', 'blocked_at_checkpoint',
+                'before_statistics', 'after_statistics', 'baseline_reproduced',
+                'reference_count', 'reference_matched_before', 'reference_matched_after',
+                'reference_unmatched_frames', 'added_candidate_frames', 'removed_candidate_frames',
+                'unlabelled_added_frames', 'tolerance_frames', 'source_video_sha256', 'false_cut_rate'):
         if key in result:
             proof[key] = result[key]
     body = f'{marker}\nAGY 协同回执：{text}（GitHub 官方执行器）\n\n'
@@ -152,6 +159,64 @@ def preview(config_path, output):
         raise ValueError('invalid_statistics')
     return {'statistics': numeric, 'preview_image_count': int(verification['preview_image_count']),
             'numeric_validation': 'passed', 'human_visual_review': 'not_verified'}
+
+
+def cut_check(config_path, output):
+    """Run the pinned stage 1 comparison, export numbers only, keep frames local."""
+    config = json.loads(config_path.read_text(encoding='utf-8'))
+    root = Path(config['project_root']).resolve()
+    python = Path(config['python']).resolve()
+    target = Path('target').resolve()
+    revision = subprocess.check_output(['git', '-C', str(target), 'rev-parse', 'HEAD'],
+                                     text=True, timeout=10).strip()
+    if revision != CUT_CHECK_SHA:
+        raise ValueError('wrong_code_revision')
+    manifest = root / 'outputs/stage1/media_manifest.json'
+    name = json.loads(manifest.read_text())['scene_manifest_file']
+    if not isinstance(name, str) or Path(name).name != name or not name.endswith('.json'):
+        raise ValueError('invalid_scene_manifest')
+    video = root / 'data/input/qianfu_ep18.mp4'
+    for item in (python, video, manifest, manifest.parent / name):
+        if not item.is_file():
+            raise ValueError('missing_local_input')
+    env = dict(os.environ, PYTHONPATH=str(target / 'src'))
+    env.pop('GH_TOKEN', None)
+    env.pop('GITHUB_TOKEN', None)
+    destination = root / 'outputs/stage1/cut-recheck' / output.name
+    # An Actions attempt has its own output directory; no reuse of old results.
+    process = run_process([str(python), '-m', 'vmv.cut_comparison',
+        '--video', str(video), '--manifest', str(manifest), '--scenes', str(manifest.parent / name),
+        '--reference', str(target / 'tasks/stage1-cut-reference.json'),
+        '--output', str(destination)], cwd=target, env=env, timeout=2700)
+    if process.returncode:
+        raise RuntimeError('stage1_cut_check_failed')
+    data = json.loads((destination / 'comparison.json').read_text())
+    safe = {}
+    for key in ('reference_count', 'reference_matched_before', 'reference_matched_after',
+                'tolerance_frames', 'preview_image_count'):
+        if type(data[key]) is not int or data[key] < 0:
+            raise ValueError('invalid_comparison')
+        safe[key] = data[key]
+    for key in ('reference_unmatched_frames', 'added_candidate_frames',
+                'removed_candidate_frames', 'unlabelled_added_frames'):
+        if not isinstance(data[key], list) or any(type(v) is not int or v < 0 for v in data[key]):
+            raise ValueError('invalid_comparison')
+        safe[key] = data[key]
+    for key in ('before_statistics', 'after_statistics'):
+        allowed = ('total_scenes', 'total_duration_sec', 'average_duration_sec',
+                   'min_duration_sec', 'max_duration_sec', 'longest_scene_index')
+        safe[key] = {k: data[key][k] for k in allowed}
+        if any(type(v) not in (int, float) or not math.isfinite(v) for v in safe[key].values()):
+            raise ValueError('invalid_statistics')
+    for key in ('source_scenes_sha256', 'source_media_manifest_sha256', 'source_video_sha256'):
+        if not isinstance(data[key], str) or not re.fullmatch(r'[a-f0-9]{64}', data[key]):
+            raise ValueError('invalid_source_hash')
+        safe[key] = data[key]
+    if type(data['baseline_reproduced']) is not bool or data['numeric_validation'] != 'passed':
+        raise ValueError('invalid_comparison')
+    safe.update(baseline_reproduced=data['baseline_reproduced'], numeric_validation='passed',
+                human_visual_review='not_verified', false_cut_rate=None)
+    return safe
 
 
 def numeric_check(config_path):
@@ -258,6 +323,9 @@ def execute(task, output, config_path):
                 probe = Path(folder) / 'challenge.txt'
                 probe.write_text(task['nonce'], encoding='ascii')
                 result['probe_sha256'] = hashlib.sha256(probe.read_bytes()).hexdigest()
+        elif task['mode'] == 'stage1-cut-check':
+            save_progress('cut_check_worker')
+            result.update(cut_check(config_path or LOCAL_CONFIG, output))
         elif task['mode'] == 'stage1-numeric':
             save_progress('numeric_worker')
             result.update(bounded_numeric_check(config_path or LOCAL_CONFIG))
@@ -292,6 +360,8 @@ def main():
         task = validate_task(json.loads(args.task.read_text(encoding='utf-8')))
         if args.validate_only:
             return 0
+        if os.environ.get('GITHUB_RUN_ID', '').isdigit():
+            args.output = args.output / (os.environ['GITHUB_RUN_ID'] + '-' + os.environ.get('GITHUB_RUN_ATTEMPT', '1'))
         result = execute(task, args.output, None)
         args.output.mkdir(parents=True, exist_ok=True)
         (args.output / 'result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -304,3 +374,4 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+

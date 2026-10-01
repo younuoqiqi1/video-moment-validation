@@ -55,7 +55,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/checkout@v4
-        if: needs.validate.outputs.mode == 'stage1-preview' || needs.validate.outputs.mode == 'stage1-numeric'
+        if: needs.validate.outputs.mode == 'stage1-preview' || needs.validate.outputs.mode == 'stage1-numeric' || needs.validate.outputs.mode == 'stage1-cut-check'
         with:
           ref: ${{ needs.validate.outputs.code_sha }}
           path: target
@@ -68,6 +68,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mac-result-${{ github.run_id }}-${{ github.run_attempt }}
-          path: data/work/actions-result/result.json
+          path: data/work/actions-result/${{ github.run_id }}-${{ github.run_attempt }}/result.json
           if-no-files-found: error
           retention-days: 7
+
