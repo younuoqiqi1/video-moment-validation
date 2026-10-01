@@ -17,11 +17,11 @@ from typing import Any
 # Only this exact task was explicitly authorized for automatic execution.
 # Pin the task blob so edits to the PR task file cannot silently broaden scope.
 AUTHORIZED_PR_TASK = {
-    "task_id": "stage1-preview-followup",
+    "task_id": "stage1-codex-local-run",
     "pr_number": 5,
     "branch": "feat/stage1-media-import",
-    "path": "tasks/stage1-preview-followup.md",
-    "blob_sha": "d24aecccdbde1fce7dc28801936dcaeb2bbb564e",
+    "path": "tasks/stage1-codex-local-run.md",
+    "blob_sha": "3b4e19c58f6b548d67614bc6348217bf76fa2dd8",
 }
 
 
@@ -264,7 +264,7 @@ class LocalTaskRunner:
     def discover_pr_branch_tasks(self) -> list[dict[str, Any]]:
         """
         Check remote PR tracking branches for authorized follow-up tasks.
-        Specifically verifies if PR #5 branch (origin/feat/stage1-media-import) has tasks/stage1-preview-followup.md.
+        Specifically verifies if PR #5 branch (origin/feat/stage1-media-import) has tasks/stage1-codex-local-run.md.
         """
         git_dir = self.repo_root / ".git"
         if not git_dir.exists():
@@ -272,7 +272,7 @@ class LocalTaskRunner:
 
         discovered: list[dict[str, Any]] = []
         monitored_pr_tasks = [
-            ("feat/stage1-media-import", 5, "tasks/stage1-preview-followup.md", "stage1-preview-followup"),
+            ("feat/stage1-media-import", 5, "tasks/stage1-codex-local-run.md", "stage1-codex-local-run"),
         ]
 
         for branch, pr_num, task_rel_path, task_id in monitored_pr_tasks:
@@ -396,10 +396,10 @@ class LocalTaskRunner:
             authorized=True,
         )
         prompt = (
-            "执行下方唯一已授权的 PR #5 阶段 1 补充任务。严格只处理任务文件列出的阶段 1 内容。"
+            "只运行 Codex 已完成的 PR #5 阶段 1 代码并检查真实素材；不要修改 src/ 或 tests/。严格只处理下方任务。"
             "当前目录是 PR #5 的独立 detached worktree；视频和阶段 1 输出通过本机忽略目录链接可读。"
             f"本机虚拟环境可用 {self.repo_root / '.venv' / 'bin' / 'python'}，执行工作区代码时设置 PYTHONPATH=src。"
-            "不要修改原视频。完成代码提交后明确推送到 PR 分支：git push origin HEAD:feat/stage1-media-import，"
+            "不要修改原视频。程序失败交回 Codex 修复；只提交脱敏运行报告，明确推送到 PR 分支：git push origin HEAD:feat/stage1-media-import，"
             "再核对 PR head 与本地 HEAD 相同。"
             "如果本机素材不存在、工作区有用户改动或无法核实真实视频，停止并在 PR 中说明阻塞；"
             "不得伪造观察结果，不得上传素材/帧图，不得合并 PR，不得开始阶段 2。"
@@ -1099,7 +1099,7 @@ class LocalTaskRunner:
                                     posted = self.post_pr_comment(
                                         st.pr_number,
                                         "@codex AGY 已开始处理已授权的阶段 1 补充任务。"
-                                        "正在核对 130 条清单、完整预览与长区间；本地素材抽查结果会单独记录。",
+                                        "正在运行 Codex 代码并检查完整清单与长区间；本地素材结果会单独记录。",
                                     )
                                     if not posted:
                                         log_msg("PR 进度评论未能发送；AGY 任务仍继续运行。")
@@ -1195,7 +1195,7 @@ class LocalTaskRunner:
                             posted = self.post_pr_comment(
                                 st.pr_number,
                                 "@codex AGY 已开始处理已授权的阶段 1 补充任务。"
-                                "正在核对 130 条清单、完整预览与长区间；本地素材抽查结果会单独记录。",
+                                "正在运行 Codex 代码并检查完整清单与长区间；本地素材结果会单独记录。",
                             )
                             if not posted:
                                 log_msg("PR 进度评论未能发送；AGY 任务仍继续运行。")

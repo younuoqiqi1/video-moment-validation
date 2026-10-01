@@ -137,8 +137,8 @@ def test_authorized_pr5_uses_detached_checkout_and_local_ignored_media(tmp_path:
     user_file.write_text("do not change")
 
     runner = LocalTaskRunner(repo_root=repo)
-    task = TaskItem(id="stage1-preview-followup", revision=1,
-                    path="tasks/stage1-preview-followup.md", authorized=True)
+    task = TaskItem(id="stage1-codex-local-run", revision=1,
+                    path="tasks/stage1-codex-local-run.md", authorized=True)
     worktree, error = runner.prepare_worktree_for_task(task, branch_name="feat/stage1-media-import")
     assert error is None
     assert worktree is not None
@@ -568,11 +568,11 @@ def test_discover_pr_branch_tasks(tmp_path: Path):
         discovered = runner.discover_pr_branch_tasks()
         assert len(discovered) == 1
         d = discovered[0]
-        assert d["task_id"] == "stage1-preview-followup"
+        assert d["task_id"] == "stage1-codex-local-run"
         assert d["pr_number"] == 5
         assert d["branch"] == "feat/stage1-media-import"
         assert d["remote_sha"] == "20cd362cd88df183b062991a14f2ac50c9b6703f"
-        assert d["task_path"] == "tasks/stage1-preview-followup.md"
+        assert d["task_path"] == "tasks/stage1-codex-local-run.md"
         assert d["title"] == "AGY 任务：阶段 1 镜头清单核对补充"
 
 
@@ -582,17 +582,17 @@ def test_run_once_pr_branch_task_discovery_and_readonly_safety_gate(tmp_path: Pa
     runner = LocalTaskRunner(repo_root=repo, runner_dir=repo / ".vmv-runner")
 
     mock_pr_task = [{
-        "task_id": "stage1-preview-followup",
+        "task_id": "stage1-codex-local-run",
         "pr_number": 5,
         "branch": "feat/stage1-media-import",
         "remote_sha": "20cd362cd88df183b062991a14f2ac50c9b6703f",
-        "task_path": "tasks/stage1-preview-followup.md",
+        "task_path": "tasks/stage1-codex-local-run.md",
         "title": "AGY 任务：阶段 1 镜头清单核对补充",
     }]
     authorized_item = TaskItem(
-        id="stage1-preview-followup",
+        id="stage1-codex-local-run",
         revision=1,
-        path="tasks/stage1-preview-followup.md",
+        path="tasks/stage1-codex-local-run.md",
         authorized=True,
     )
     resolver_results = [
@@ -622,7 +622,7 @@ def test_run_once_pr_branch_task_discovery_and_readonly_safety_gate(tmp_path: Pa
                                             runner, "execute_cli_task", return_value=(0, "已完成", 4321)
                                         ) as mock_exec:
                                             with patch.object(runner, "find_matching_review", return_value=(None, None)):
-                                                task_key = "stage1-preview-followup:r1"
+                                                task_key = "stage1-codex-local-run:r1"
 
                                                 # A transient GitHub read failure keeps the task retryable.
                                                 assert runner.run_once() == 0
@@ -659,10 +659,10 @@ def test_run_once_pr_branch_task_discovery_and_readonly_safety_gate(tmp_path: Pa
 @pytest.mark.parametrize(
     "pr_change,blob_sha,retryable",
     [
-        ({"state": "closed"}, "d24aecccdbde1fce7dc28801936dcaeb2bbb564e", False),
-        ({"draft": True}, "d24aecccdbde1fce7dc28801936dcaeb2bbb564e", False),
-        ({"number": 6}, "d24aecccdbde1fce7dc28801936dcaeb2bbb564e", False),
-        ({"head_sha": "f" * 40}, "d24aecccdbde1fce7dc28801936dcaeb2bbb564e", True),
+        ({"state": "closed"}, "3b4e19c58f6b548d67614bc6348217bf76fa2dd8", False),
+        ({"draft": True}, "3b4e19c58f6b548d67614bc6348217bf76fa2dd8", False),
+        ({"number": 6}, "3b4e19c58f6b548d67614bc6348217bf76fa2dd8", False),
+        ({"head_sha": "f" * 40}, "3b4e19c58f6b548d67614bc6348217bf76fa2dd8", True),
         ({}, "0" * 40, False),
     ],
 )
@@ -673,11 +673,11 @@ def test_resolver_rejects_pr_or_task_version_mismatch(
     runner = LocalTaskRunner(repo_root=tmp_path, runner_dir=tmp_path / ".vmv-runner")
     branch_sha = "20cd362cd88df183b062991a14f2ac50c9b6703f"
     discovery = {
-        "task_id": "stage1-preview-followup",
+        "task_id": "stage1-codex-local-run",
         "pr_number": 5,
         "branch": "feat/stage1-media-import",
         "remote_sha": branch_sha,
-        "task_path": "tasks/stage1-preview-followup.md",
+        "task_path": "tasks/stage1-codex-local-run.md",
     }
     pr_info = {
         "number": 5,
@@ -708,11 +708,11 @@ def test_resolver_accepts_only_pinned_task_after_pr_and_blob_checks(tmp_path: Pa
     runner = LocalTaskRunner(repo_root=tmp_path, runner_dir=tmp_path / ".vmv-runner")
     branch_sha = "20cd362cd88df183b062991a14f2ac50c9b6703f"
     discovery = {
-        "task_id": "stage1-preview-followup",
+        "task_id": "stage1-codex-local-run",
         "pr_number": 5,
         "branch": "feat/stage1-media-import",
         "remote_sha": branch_sha,
-        "task_path": "tasks/stage1-preview-followup.md",
+        "task_path": "tasks/stage1-codex-local-run.md",
     }
     pr_info = {
         "number": 5, "state": "open", "draft": False,
@@ -722,7 +722,7 @@ def test_resolver_accepts_only_pinned_task_after_pr_and_blob_checks(tmp_path: Pa
     def git_object(cmd, **kwargs):
         if cmd[1] == "rev-parse":
             return subprocess.CompletedProcess(
-                cmd, 0, stdout="d24aecccdbde1fce7dc28801936dcaeb2bbb564e\n", stderr=""
+                cmd, 0, stdout="3b4e19c58f6b548d67614bc6348217bf76fa2dd8\n", stderr=""
             )
         if cmd[1] == "show":
             return subprocess.CompletedProcess(
@@ -735,7 +735,7 @@ def test_resolver_accepts_only_pinned_task_after_pr_and_blob_checks(tmp_path: Pa
             item, prompt, error, can_retry = runner.resolve_authorized_pr_task(discovery)
 
     assert item is not None and item.authorized
-    assert item.id == "stage1-preview-followup"
+    assert item.id == "stage1-codex-local-run"
     assert "阶段 1 镜头清单核对补充" in (prompt or "")
     assert error is None
     assert can_retry is False
