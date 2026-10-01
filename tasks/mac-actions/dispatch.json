@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "task_id": "stage1-cut-diagnose-20261001",
+  "task_id": "stage1-score-diagnose-20261001",
   "mode": "stage1-cut-check",
-  "nonce": "bc349b57810e73c087a8977c7173d9c3197a0980cde2a5570916e8699a88082c",
+  "nonce": "449175af6efe582368ac1229c5784d4b8e32faf7960393d88b78409c9127cd7b",
   "pr_number": 5,
-  "code_sha": "eeca4d7b44da6ecbfde72387e3203eb619be5d6d"
+  "code_sha": "b7095d12e402d24f9d6e773689273378dbae2eb4"
 }

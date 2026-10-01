@@ -15,7 +15,7 @@ from pathlib import Path
 
 REPO = 'younuoqiqi1/video-moment-validation'
 STAGE1_SHA = '39c48d9a87167decb3ab53d5da5d79d6e3bd9c05'
-CUT_CHECK_SHA = 'eeca4d7b44da6ecbfde72387e3203eb619be5d6d'
+CUT_CHECK_SHA = 'b7095d12e402d24f9d6e773689273378dbae2eb4'
 LOCAL_CONFIG = Path.home() / '.local/share/vmv-actions-runner/vmv-local.json'
 
 
@@ -111,6 +111,7 @@ def post_receipt(task, result, phase):
         'workflow_sha', 'code_sha', 'execution_status', 'started_at') if key in result}
     for key in ('completed_at', 'probe_sha256', 'statistics', 'preview_image_count',
                 'numeric_validation', 'human_visual_review', 'error_code', 'failure_stage',
+                'score_frame_count', 'first_score_sec', 'last_score_sec',
                 'adjacent_scenes', 'source_scenes_sha256', 'source_media_manifest_sha256',
                 'fps', 'analyzed_duration_sec', 'checkpoint', 'blocked_at_checkpoint',
                 'before_statistics', 'after_statistics', 'baseline_reproduced',
@@ -172,11 +173,18 @@ def safe_cut_failure(stdout):
         'verify_analysis_range', 'create_candidate_directory', 'fixed_detection',
         'adaptive_detection', 'write_candidate_manifests', 'candidate_preview',
         'verify_source_unchanged', 'comparison_complete'}
-    codes = {'missing_input', 'output_exists', 'invalid_data', 'execution_error'}
+    codes = {'missing_input', 'output_exists', 'invalid_data', 'execution_error',
+        'incomplete_coverage', 'ffmpeg_process_failed', 'ffmpeg_timeout', 'ffmpeg_missing',
+        'invalid_frame_scores', 'noncontiguous_frame_scores', 'empty_frame_scores'}
     try:
         data = json.loads(stdout.splitlines()[-1])
         if data['failure_stage'] in stages and data['error_code'] in codes:
-            return {key: data[key] for key in ('failure_stage', 'error_code')}
+            safe = {key: data[key] for key in ('failure_stage', 'error_code')}
+            for key in ('score_frame_count', 'first_score_sec', 'last_score_sec'):
+                value = data.get(key)
+                if type(value) in (int, float) and math.isfinite(value):
+                    safe[key] = value
+            return safe
     except (ValueError, KeyError, IndexError, TypeError):
         pass
     return {'error_code': 'stage1_cut_check_failed'}
