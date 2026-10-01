@@ -25,3 +25,16 @@ python -m vmv.cut_comparison --video data/input/qianfu_ep18.mp4 \
 3. 查新最长区间及原 #083/#125/#105/#074/#049 对应范围与相邻区间。仍漏切则回报帧号和安全描述。
 4. 将安全数字与来源 SHA/Actions 链接追加到 `reports/stage1-local-preview-result.md`，保留历史内容；发“AGY 协同回执：实际完成”或具体阻塞，不只说轮询成功。不要把数值匹配当人工验收。
 5. 保持 awaiting_review，不合并、不进入阶段 2。
+
+
+## 2026-10-01 当前续做入口：修正后候选画面复核
+
+旧 tasks/stage1-codex-local-run.md 已完成并改为历史入口。21:51交付仍是130条旧基线，不能据此判断 f1e 自适应检测失败，也不需要再次开发同一修正。
+
+1. 同步 PR #5 最新任务文件，保留本机用户改动。采用代码 f1e3b5f5da041a2fb68bfb4aa405696245ce6d0e 的 [Mac run 36862013598](https://github.com/younuoqiqi1/video-moment-validation/actions/runs/36862013598) 产物。本机项目下该执行器输出相对目录为 `outputs/stage1/cut-recheck/36862013598-1/`（来自固定执行脚本的目录规则；需在本机确认存在，不能猜成功）。读取同目录 comparison.json、media_manifest.json、候选 scenes JSON 与 preview/summary.html；原 outputs/stage1 下的130条JSON只作为 before 对照。
+2. 先实际确认候选 total_scenes=320、after_statistics 最长87秒(#260)、328张预览、before130/after320及来源哈希与完成回执一致；若不一致，记录真实数字和阻塞，禁止改数迎合预期。目录不存在则按上方已授权 cut_comparison 命令在全新输出目录复跑，不重复 baseline-only preview，不覆盖旧产物。
+3. 先核第35297帧与#260，报告是否仍漏切；复核14暂定参考点，再逐项标注 comparison.json 内199新增及9移除。单独记录实际查看/未查看/无法确认项，给每项帧号、分类与安全短描述；参考命中不能自动算正确。
+4. 追加修正后章节到 reports/stage1-local-preview-result.md，保留130条旧基线历史；注明本轮代码SHA、来源run、实际开始/完成时间、检查量、剩余漏切与误切。同步进度为“数值复跑完成，修正后画面验收待补充/实际完成”，保持 awaiting_review及总体已验收10%。
+5. 先回报第35297帧及#260的真实观察结果，再继续其余项目；若本地执行端无法打开候选图或原片，直接给具体安全阻塞。不要等待新的算法提交，不向 Codex 机器人发送仅 @codex 的启动留言，不把发评论当执行。真实素材和帧图只留本地。
+
+依据：[本轮审查](https://github.com/younuoqiqi1/video-moment-validation/blob/main/reviews/pr-5-46d9e8d0a5cbd16b7e1a14b7e14d1e819bd94fce.md)。
