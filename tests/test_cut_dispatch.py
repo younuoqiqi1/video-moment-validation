@@ -80,3 +80,13 @@ def test_only_safe_comparison_fields_are_returned(tmp_path, monkeypatch):
     assert result['reference_matched_after'] == 9
     assert 'SECRET_TOKEN' not in json.dumps(result)
     assert str(root) not in json.dumps(result)
+
+
+def test_safe_failure_diagnostics_are_allowlisted():
+    m = importlib.import_module('scripts.mac_actions')
+    result = m.safe_cut_failure('checkpoint:fixed_detection\n' + json.dumps({
+        'failure_stage': 'fixed_detection', 'error_code': 'invalid_data',
+        'token': 'SECRET_TOKEN', 'path': '/private/media'}))
+    assert result == {'failure_stage': 'fixed_detection', 'error_code': 'invalid_data'}
+    assert m.safe_cut_failure(json.dumps({'failure_stage': '/private/media',
+        'error_code': 'SECRET_TOKEN'})) == {'error_code': 'stage1_cut_check_failed'}

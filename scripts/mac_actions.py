@@ -15,7 +15,7 @@ from pathlib import Path
 
 REPO = 'younuoqiqi1/video-moment-validation'
 STAGE1_SHA = '39c48d9a87167decb3ab53d5da5d79d6e3bd9c05'
-CUT_CHECK_SHA = '6bb8f6c08fbab4bd856e86091728ebf28f036361'
+CUT_CHECK_SHA = 'eeca4d7b44da6ecbfde72387e3203eb619be5d6d'
 LOCAL_CONFIG = Path.home() / '.local/share/vmv-actions-runner/vmv-local.json'
 
 
@@ -110,7 +110,7 @@ def post_receipt(task, result, phase):
     proof = {key: result[key] for key in ('task_id', 'mode', 'nonce', 'platform',
         'workflow_sha', 'code_sha', 'execution_status', 'started_at') if key in result}
     for key in ('completed_at', 'probe_sha256', 'statistics', 'preview_image_count',
-                'numeric_validation', 'human_visual_review', 'error_code',
+                'numeric_validation', 'human_visual_review', 'error_code', 'failure_stage',
                 'adjacent_scenes', 'source_scenes_sha256', 'source_media_manifest_sha256',
                 'fps', 'analyzed_duration_sec', 'checkpoint', 'blocked_at_checkpoint',
                 'before_statistics', 'after_statistics', 'baseline_reproduced',
@@ -161,6 +161,27 @@ def preview(config_path, output):
             'numeric_validation': 'passed', 'human_visual_review': 'not_verified'}
 
 
+class CutCheckFailure(RuntimeError):
+    def __init__(self, safe):
+        super().__init__('stage1_cut_check_failed')
+        self.safe = safe
+
+
+def safe_cut_failure(stdout):
+    stages = {'read_reference', 'read_manifests', 'verify_source_hashes',
+        'verify_analysis_range', 'create_candidate_directory', 'fixed_detection',
+        'adaptive_detection', 'write_candidate_manifests', 'candidate_preview',
+        'verify_source_unchanged', 'comparison_complete'}
+    codes = {'missing_input', 'output_exists', 'invalid_data', 'execution_error'}
+    try:
+        data = json.loads(stdout.splitlines()[-1])
+        if data['failure_stage'] in stages and data['error_code'] in codes:
+            return {key: data[key] for key in ('failure_stage', 'error_code')}
+    except (ValueError, KeyError, IndexError, TypeError):
+        pass
+    return {'error_code': 'stage1_cut_check_failed'}
+
+
 def cut_check(config_path, output):
     """Run the pinned stage 1 comparison, export numbers only, keep frames local."""
     config = json.loads(config_path.read_text(encoding='utf-8'))
@@ -189,7 +210,7 @@ def cut_check(config_path, output):
         '--reference', str(target / 'tasks/stage1-cut-reference.json'),
         '--output', str(destination)], cwd=target, env=env, timeout=2700)
     if process.returncode:
-        raise RuntimeError('stage1_cut_check_failed')
+        raise CutCheckFailure(safe_cut_failure(process.stdout))
     data = json.loads((destination / 'comparison.json').read_text())
     safe = {}
     for key in ('reference_count', 'reference_matched_before', 'reference_matched_after',
@@ -333,6 +354,8 @@ def execute(task, output, config_path):
             result.update(preview(config_path or LOCAL_CONFIG, output / 'local-preview'))
         if result['execution_status'] == 'started':
             result['execution_status'] = 'completed'
+    except CutCheckFailure as exc:
+        result.update(execution_status='failed', **exc.safe)
     except Exception:
         result.update(execution_status='failed', error_code='execution_failed')
     result['completed_at'] = datetime.now(timezone.utc).isoformat()
