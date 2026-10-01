@@ -15,7 +15,7 @@ from pathlib import Path
 
 REPO = 'younuoqiqi1/video-moment-validation'
 STAGE1_SHA = '39c48d9a87167decb3ab53d5da5d79d6e3bd9c05'
-CUT_CHECK_SHA = 'b7095d12e402d24f9d6e773689273378dbae2eb4'
+CUT_CHECK_SHA = 'f1e3b5f5da041a2fb68bfb4aa405696245ce6d0e'
 LOCAL_CONFIG = Path.home() / '.local/share/vmv-actions-runner/vmv-local.json'
 
 
