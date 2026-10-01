@@ -55,3 +55,8 @@ Mac 必须保持联网和唤醒。App 是否打开与官方 runner 无关。机�
 - https://docs.github.com/en/actions/concepts/runners/self-hosted-runners
 - https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/configure-the-application?platform=mac
 - https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/monitor-and-troubleshoot?platform=mac
+
+
+## 2026-10-01 阶段 1 低分数漏切复验
+
+新增固定复验版本 `abb5f973f2b7cc07ee3eaf743d05f2f24f54af2c`，只允许本 PR 的 `stage1-cut-check` 模式使用。执行器保留原先修复版 SHA 白名单，并仅回传脱敏数字。派发文件对应任务 `stage1-low-floor-rerun-20261001`；推送该文件会触发固定 Mac 执行工作流，任务创建不等同于 Mac 已开始。

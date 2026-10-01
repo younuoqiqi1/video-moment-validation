@@ -16,6 +16,7 @@ from pathlib import Path
 REPO = 'younuoqiqi1/video-moment-validation'
 STAGE1_SHA = '39c48d9a87167decb3ab53d5da5d79d6e3bd9c05'
 CUT_CHECK_SHA = 'f1e3b5f5da041a2fb68bfb4aa405696245ce6d0e'
+CUT_CHECK_SHAS = frozenset({CUT_CHECK_SHA, 'abb5f973f2b7cc07ee3eaf743d05f2f24f54af2c'})
 LOCAL_CONFIG = Path.home() / '.local/share/vmv-actions-runner/vmv-local.json'
 
 
@@ -77,7 +78,7 @@ def validate_task(task):
         return task
     if task['mode'] in ('stage1-preview', 'stage1-numeric') and task['pr_number'] == 5 and task['code_sha'] == STAGE1_SHA:
         return task
-    if task['mode'] == 'stage1-cut-check' and task['pr_number'] == 5 and task['code_sha'] == CUT_CHECK_SHA:
+    if task['mode'] == 'stage1-cut-check' and task['pr_number'] == 5 and task['code_sha'] in CUT_CHECK_SHAS:
         return task
     raise ValueError('unauthorized_task')
 
@@ -198,7 +199,7 @@ def cut_check(config_path, output):
     target = Path('target').resolve()
     revision = subprocess.check_output(['git', '-C', str(target), 'rev-parse', 'HEAD'],
                                      text=True, timeout=10).strip()
-    if revision != CUT_CHECK_SHA:
+    if revision not in CUT_CHECK_SHAS:
         raise ValueError('wrong_code_revision')
     manifest = root / 'outputs/stage1/media_manifest.json'
     name = json.loads(manifest.read_text())['scene_manifest_file']

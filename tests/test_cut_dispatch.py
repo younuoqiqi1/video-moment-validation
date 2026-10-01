@@ -90,3 +90,11 @@ def test_safe_failure_diagnostics_are_allowlisted():
     assert result == {'failure_stage': 'fixed_detection', 'error_code': 'invalid_data'}
     assert m.safe_cut_failure(json.dumps({'failure_stage': '/private/media',
         'error_code': 'SECRET_TOKEN'})) == {'error_code': 'stage1_cut_check_failed'}
+
+
+def test_fixed_cut_job_accepts_newly_reviewed_revision():
+    m = importlib.import_module('scripts.mac_actions')
+    t = {**task(m), 'code_sha': 'abb5f973f2b7cc07ee3eaf743d05f2f24f54af2c'}
+    assert m.validate_task(t) == t
+    with pytest.raises(ValueError):
+        m.validate_task({**t, 'code_sha': '0'*40})
