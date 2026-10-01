@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "task_id": "mac-probe-20261001-1",
-  "mode": "probe",
-  "nonce": "7cabf65df8e3e7d2d052ac7a8f10e3fe1f0f49af2050fca2cc4ea1fbd4c2e715",
-  "pr_number": 3,
-  "code_sha": ""
+  "task_id": "stage1-numeric-recheck-20261001-1608",
+  "mode": "stage1-preview",
+  "nonce": "d3ce799275d8b3fd4d2eb8e4b4a56ca3b59fb5741f6c0bf62470918579ee238e",
+  "pr_number": 5,
+  "code_sha": "39c48d9a87167decb3ab53d5da5d79d6e3bd9c05"
 }
