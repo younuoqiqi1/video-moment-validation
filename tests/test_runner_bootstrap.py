@@ -8,6 +8,48 @@ import pytest
 from vmv.runner_bootstrap import refresh_runner
 
 
+def test_poll_failure_reports_safe_status_and_deduplicates(tmp_path, monkeypatch):
+    from vmv import runner_bootstrap
+    from vmv.runner import LocalTaskRunner
+    comments = []
+    monkeypatch.setattr(LocalTaskRunner, "post_pr_comment", lambda self, pr, body: comments.append((pr, body)) or True)
+    def fail_refresh(*args):
+        raise RuntimeError("token=secret-personal-value /Users/private-owner/project")
+    monkeypatch.setattr(runner_bootstrap, "refresh_runner", fail_refresh)
+    args = ["--repo", str(tmp_path), "--code-root", str(tmp_path / "code")]
+    assert runner_bootstrap.main(args) == 1
+    assert runner_bootstrap.main(args) == 1
+    assert len(comments) == 1
+    assert comments[0][0] == 3
+    assert "AGY 协同回执" in comments[0][1]
+    assert "更新失败" in comments[0][1]
+    assert "secret-personal-value" not in comments[0][1]
+    assert "/Users/" not in comments[0][1]
+
+
+def test_poll_reports_new_code_and_blocked_task_without_uploading_logs(tmp_path, monkeypatch):
+    from vmv import runner_bootstrap
+    from vmv.runner import LocalTaskRunner, TaskState
+    comments = []
+    monkeypatch.setattr(LocalTaskRunner, "post_pr_comment", lambda self, pr, body: comments.append((pr, body)) or True)
+    monkeypatch.setattr(runner_bootstrap, "refresh_runner", lambda *args: "a" * 40)
+    runner = LocalTaskRunner(tmp_path)
+    runner.save_state({"stage1-preview-followup:r1": TaskState(
+        task_id="stage1-preview-followup", revision=1, status="blocked", pr_number=5,
+        last_error="工作区准备失败: 本机视频或阶段 1 完整清单目录缺失 token=private",
+    )})
+    monkeypatch.setattr(runner_bootstrap.subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 1))
+    args = ["--repo", str(tmp_path), "--code-root", str(tmp_path / "code")]
+    assert runner_bootstrap.main(args) == 1
+    assert runner_bootstrap.main(args) == 1
+    assert len(comments) == 2
+    assert "轮询已启动" in comments[0][1]
+    assert "blocked" in comments[1][1]
+    assert "本机素材或清单缺失" in comments[1][1]
+    assert "private" not in comments[1][1]
+    assert "AGY 已开始" not in comments[0][1]
+
+
 def git(repo: Path, *args: str) -> str:
     return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
 
