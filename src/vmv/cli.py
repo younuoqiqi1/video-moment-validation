@@ -68,6 +68,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="镜头场景切分敏感度阈值 (默认: 0.35)",
     )
 
+    import_parser.add_argument("--scene-mode", choices=("adaptive", "fixed"), default="adaptive",
+                               help="自适应补检或旧固定阈值对照")
+
     preview_parser = subparsers.add_parser("preview", help="核对现有完整 JSON 并生成本机画面预览")
     preview_parser.add_argument("--media-manifest", type=Path, required=True)
     preview_parser.add_argument("--scenes", type=Path, required=True)
@@ -123,6 +126,7 @@ def main(argv: list[str] | None = None) -> int:
             target_pattern=args.target,
             max_duration_sec=max_dur,
             scene_threshold=args.threshold,
+            scene_mode=args.scene_mode,
         )
 
         print("=" * 60)
@@ -158,3 +162,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

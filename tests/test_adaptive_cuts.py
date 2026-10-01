@@ -1,0 +1,65 @@
+"""Real FFmpeg regression fixtures; no private footage or fitted timestamps."""
+import shutil
+import subprocess
+
+import pytest
+
+from vmv.media import detect_scenes
+
+
+def fixture(tmp_path, luminance):
+    if not shutil.which('ffmpeg'):
+        pytest.skip('ffmpeg unavailable')
+    path = tmp_path / 'fixture.mkv'
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i',
+        f"nullsrc=s=160x90:r=25:d=4,geq=lum='{luminance}':cb=128:cr=128",
+        '-c:v', 'ffv1', str(path)], capture_output=True, check=True)
+    return path
+
+
+def test_low_contrast_hard_cut_recovers_exact_frame(tmp_path):
+    video = fixture(tmp_path, 'if(lt(N,50),80,92)')
+    scenes = detect_scenes(video, 4, fps=25)
+    assert [s.start_frame for s in scenes] == [0, 50]
+    assert scenes[0].end_frame == scenes[1].start_frame
+    assert scenes[-1].end_sec == 4
+
+
+def test_fixed_mode_preserves_baseline_for_comparison(tmp_path):
+    video = fixture(tmp_path, 'if(lt(N,50),80,92)')
+    assert len(detect_scenes(video, 4, mode='fixed')) == 1
+
+
+@pytest.mark.parametrize('luminance', ['80+N/2', '80', 'if(eq(N,50),180,80)'])
+def test_gradual_light_static_and_single_frame_flash_are_not_cuts(tmp_path, luminance):
+    assert len(detect_scenes(fixture(tmp_path, luminance), 4)) == 1
+
+
+def test_strong_cut_and_duration_limit(tmp_path):
+    video = fixture(tmp_path, 'if(lt(N,50),30,180)')
+    assert [s.start_frame for s in detect_scenes(video, 4)] == [0, 50]
+    assert len(detect_scenes(video, 4, max_duration_sec=1.5)) == 1
+    assert detect_scenes(video, 4, max_duration_sec=1.5)[-1].end_sec == 1.5
+
+
+def test_continuous_motion_does_not_create_cuts(tmp_path):
+    if not shutil.which('ffmpeg'):
+        pytest.skip('ffmpeg unavailable')
+    path = tmp_path / 'motion.mkv'
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i',
+        'testsrc2=s=160x90:r=25:d=4', '-c:v', 'ffv1', str(path)], check=True, capture_output=True)
+    assert len(detect_scenes(path, 4)) == 1
+
+
+@pytest.mark.parametrize('rows', [[(0, 0, 0)], [(0, 0, 0), (1, 0, 0)],
+    [(0,0,0),(.04,0,0),(.02,0,0)]])
+def test_incomplete_or_nonmonotonic_scores_cannot_claim_full_coverage(monkeypatch, rows):
+    import vmv.media as media
+    monkeypatch.setattr(media, 'read_frame_scores', lambda *a: rows)
+    with pytest.raises(media.MediaProbeError):
+        detect_scenes(None, 1800, fps=25)
+
+
+@pytest.mark.parametrize('frame', [98,99])
+def test_endpoint_flash_is_not_a_tiny_final_scene(tmp_path, frame):
+    assert len(detect_scenes(fixture(tmp_path, f'if(eq(N,{frame}),180,80)'), 4)) == 1

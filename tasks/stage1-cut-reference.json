@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "fps": 25,
+  "analyzed_duration_sec": 1800,
+  "source_scenes_sha256": "6ec9c85d5941f184b423a3c7f472c6d664474a6f818c736b556b1bcaaf183776",
+  "source_media_manifest_sha256": "11d1fb975589ad330b4c7fd6316917d7eac41995dc3adacd76eef991eb8cae9e",
+  "source_video_sha256": "7987a13f4df2403d0eb3927a9c1f6b170821077e171afc72df4c95d935f17c9c",
+  "reference_frames": [
+    8949,
+    9794,
+    16808,
+    18177,
+    21523,
+    24408,
+    25272,
+    25361,
+    25485,
+    34293,
+    35297,
+    40298,
+    41256,
+    41774
+  ],
+  "reference_status": "AGY_reported_not_independently_verified",
+  "source_report": "reports/stage1-local-preview-result.md",
+  "source_commit": "99e7ff9b517fc6faaf017264313f8d3459c9d17b"
+}

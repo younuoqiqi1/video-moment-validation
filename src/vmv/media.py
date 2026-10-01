@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from vmv.stages import StageResult
+from vmv.scene_detection import read_frame_scores, select_cutpoints
 
 
 class MediaProbeError(Exception):
@@ -322,57 +323,33 @@ def detect_scenes(
     max_duration_sec: float | None = None,
     threshold: float = 0.35,
     min_scene_duration: float = 0.5,
+    mode: str = "adaptive",
 ) -> list[SceneItem]:
     """
     Detect scene cutpoints using ffmpeg select filter and return a contiguous list of SceneItems.
     """
-    ffmpeg_bin = shutil.which("ffmpeg")
-    if not ffmpeg_bin:
-        raise MediaProbeError("系统未找到 ffmpeg 工具，请检查 PATH 设置")
-
-    cmd = [ffmpeg_bin]
+    if (mode not in ("adaptive", "fixed") or not math.isfinite(threshold)
+            or not 0 < threshold <= 1 or not math.isfinite(fps) or fps <= 0
+            or not math.isfinite(total_duration_sec) or total_duration_sec <= 0
+            or not math.isfinite(min_scene_duration) or min_scene_duration <= 0):
+        raise MediaProbeError("镜头检测参数无效")
     effective_duration = total_duration_sec
-    if max_duration_sec and max_duration_sec > 0 and max_duration_sec < total_duration_sec:
-        cmd.extend(["-t", str(max_duration_sec)])
-        effective_duration = max_duration_sec
-
-    cmd.extend([
-        "-i", str(video_path),
-        "-filter:v", f"select='gt(scene,{threshold})',showinfo",
-        "-f", "null",
-        "-",
-    ])
-
+    if max_duration_sec is not None:
+        if not math.isfinite(max_duration_sec) or max_duration_sec <= 0:
+            raise MediaProbeError("最大分析时长必须为正数")
+        effective_duration = min(max_duration_sec, total_duration_sec)
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        stderr_output = proc.stderr
-    except subprocess.CalledProcessError as exc:
-        raise MediaProbeError(f"ffmpeg 场景切分失败: {exc.stderr.strip()[:200]}")
-
-    # Extract pts_time from showinfo
-    # Pattern: pts_time:12.3456
-    cutpoints: list[float] = []
-    for line in stderr_output.splitlines():
-        if "pts_time:" in line:
-            m = re.search(r"pts_time:([0-9.]+)", line)
-            if m:
-                try:
-                    pt = float(m.group(1))
-                    if 0 < pt < effective_duration:
-                        cutpoints.append(pt)
-                except ValueError:
-                    pass
-
-    # Deduplicate and sort cutpoints
-    cutpoints = sorted(list(set(cutpoints)))
-
-    # Filter out cuts that are too close together (< min_scene_duration)
-    filtered_cuts: list[float] = []
-    last_cut = 0.0
-    for cp in cutpoints:
-        if (cp - last_cut) >= min_scene_duration:
-            filtered_cuts.append(cp)
-            last_cut = cp
+        rows = read_frame_scores(video_path, effective_duration)
+        tolerance = 1 / fps + .003
+        if (not rows or abs(rows[0][0]) > .003
+                or abs(rows[-1][0] + 1/fps - effective_duration) > tolerance
+                or any(not 0 < right[0]-left[0] <= 1.5/fps
+                       for left, right in zip(rows, rows[1:]))):
+            raise ValueError("帧时间戳或分析范围覆盖不完整（需要恒定帧率素材）")
+        filtered_cuts = select_cutpoints(rows, fps, effective_duration, threshold,
+                                         mode, min_duration=min_scene_duration)
+    except (ValueError, subprocess.SubprocessError, OSError) as exc:
+        raise MediaProbeError("ffmpeg 场景切分失败（分数读取或执行异常）") from exc
 
     # Build scene items
     scenes: list[SceneItem] = []
@@ -681,6 +658,7 @@ def run_stage1_media_import(
     max_duration_sec: float | None = 1800.0,  # 30 mins
     scene_threshold: float = 0.35,
     repo_root: Path | None = None,
+    scene_mode: str = "adaptive",
 ) -> StageResult:
     """
     Execute Stage 1 media import pipeline:
@@ -758,6 +736,7 @@ def run_stage1_media_import(
             fps=fps,
             max_duration_sec=max_duration_sec,
             threshold=scene_threshold,
+            mode=scene_mode,
         )
     except MediaProbeError as exc:
         err_msg = f"镜头场景切分失败: {exc}"
@@ -786,6 +765,9 @@ def run_stage1_media_import(
         "fps": fps,
         "total_scenes": len(scenes),
         "analyzed_duration_sec": max_duration_sec if (max_duration_sec and max_duration_sec < media_info.duration_sec) else media_info.duration_sec,
+        "detector": {"version": 2, "mode": scene_mode, "threshold": scene_threshold,
+                     "adaptive_floor": .06, "adaptive_ratio": 3.0, "window_sec": 1.0,
+                     "min_scene_duration": .5},
         "scenes": [s.to_dict() for s in scenes],
     }
     scenes_path.write_text(json.dumps(scenes_data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -816,3 +798,4 @@ def run_stage1_media_import(
             "subtitles": media_info.subtitle_summary,
         },
     )
+
