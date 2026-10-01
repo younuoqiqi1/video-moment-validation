@@ -3,7 +3,7 @@
 - **执行日期**：2026-10-01（Asia/Shanghai）
 - **运行环境**：macOS (Apple Silicon), Python 3.12 虚拟环境 (static_ffmpeg / Apple Silicon 硬件加速就绪)
 - **代码提交基线**：`98ab527bcdef966e3c39f76d7377b97e0587deba` (Codex preview 实现)
-- **当前 HEAD SHA**：`39c48d9a87167decb3ab53d5da5d79d6e3bd9c05`
+- **运行代码 SHA**：`f9fadacb4db3eed74f9432a292902ab1bc02ab16` (PR #5 最新提交)
 - **关联任务**：`tasks/stage1-codex-local-run.md`
 - **执行原则**：只运行 Codex 编写的预览程序、检查本机真实素材画面并回报脱敏结果；不修改 `src/` 或 `tests/`，不调整切分阈值，不合并 PR，不进入阶段 2。
 
