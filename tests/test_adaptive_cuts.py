@@ -25,6 +25,16 @@ def test_low_contrast_hard_cut_recovers_exact_frame(tmp_path):
     assert scenes[-1].end_sec == 4
 
 
+def test_dark_low_contrast_composition_cut_below_old_floor(tmp_path):
+    # A dark highlight moves across the frame at a hard cut. The FFmpeg scene
+    # score is below the former absolute 0.06 floor, but above the tuned floor.
+    video = fixture(tmp_path,
+        'if(lt(N,50),if(lt(X,16),32,8),if(gt(X,144),32,8))')
+    scenes = detect_scenes(video, 4, fps=25)
+    assert [s.start_frame for s in scenes] == [0, 50]
+    assert scenes[0].end_frame == scenes[1].start_frame
+
+
 def test_fixed_mode_preserves_baseline_for_comparison(tmp_path):
     video = fixture(tmp_path, 'if(lt(N,50),80,92)')
     assert len(detect_scenes(video, 4, mode='fixed')) == 1

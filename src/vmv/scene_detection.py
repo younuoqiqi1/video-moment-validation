@@ -46,7 +46,7 @@ def read_frame_scores(video: Path, duration: float):
 
 
 def select_cutpoints(rows, fps, duration, threshold=.35, mode='adaptive',
-                     floor=.06, ratio=3.0, min_duration=.5):
+                     floor=.04, ratio=3.0, min_duration=.5):
     """Adaptive additions require a local peak three times nearby activity.
 
     The fixed mode intentionally retains the old threshold and spacing for
