@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "task_id": "stage1-numeric-recheck-20261001-1608",
-  "mode": "stage1-preview",
-  "nonce": "d3ce799275d8b3fd4d2eb8e4b4a56ca3b59fb5741f6c0bf62470918579ee238e",
+  "task_id": "stage1-numeric-only-20261001-1700",
+  "mode": "stage1-numeric",
+  "nonce": "4448340b2b84ea045bcc2606c735b332c98686c22bb4cc9c4e70d3fd700febb7",
   "pr_number": 5,
   "code_sha": "39c48d9a87167decb3ab53d5da5d79d6e3bd9c05"
 }

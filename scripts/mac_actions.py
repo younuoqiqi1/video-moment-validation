@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import math
 import os
 import platform
 import re
@@ -27,7 +28,7 @@ def validate_task(task):
         raise ValueError('invalid_pr')
     if task['mode'] == 'probe' and task['pr_number'] == 3 and task['code_sha'] == '':
         return task
-    if task['mode'] == 'stage1-preview' and task['pr_number'] == 5 and task['code_sha'] == STAGE1_SHA:
+    if task['mode'] in ('stage1-preview', 'stage1-numeric') and task['pr_number'] == 5 and task['code_sha'] == STAGE1_SHA:
         return task
     raise ValueError('unauthorized_task')
 
@@ -60,7 +61,9 @@ def post_receipt(task, result, phase):
     proof = {key: result[key] for key in ('task_id', 'mode', 'nonce', 'platform',
         'workflow_sha', 'code_sha', 'execution_status', 'started_at') if key in result}
     for key in ('completed_at', 'probe_sha256', 'statistics', 'preview_image_count',
-                'numeric_validation', 'human_visual_review', 'error_code'):
+                'numeric_validation', 'human_visual_review', 'error_code',
+                'adjacent_scenes', 'source_scenes_sha256', 'source_media_manifest_sha256',
+                'fps', 'analyzed_duration_sec'):
         if key in result:
             proof[key] = result[key]
     body = f'{marker}\nAGY 协同回执：{text}（GitHub 官方执行器）\n\n'
@@ -105,6 +108,77 @@ def preview(config_path, output):
             'numeric_validation': 'passed', 'human_visual_review': 'not_verified'}
 
 
+def numeric_check(config_path):
+    """Read the entire original JSON without opening, hashing or decoding video."""
+    try:
+        config = json.loads(config_path.read_text(encoding='utf-8'))
+        target = Path('target').resolve()
+        if subprocess.check_output(['git', '-C', str(target), 'rev-parse', 'HEAD'],
+                                   text=True, timeout=10).strip() != STAGE1_SHA:
+            raise ValueError('wrong_code_revision')
+        manifest = Path(config['project_root']).resolve() / 'outputs/stage1/media_manifest.json'
+        manifest_bytes = manifest.read_bytes()
+        data = json.loads(manifest_bytes)
+        name = data['scene_manifest_file']
+        if not isinstance(name, str) or Path(name).name != name or not name.endswith('.json'):
+            raise ValueError('invalid_scene_manifest')
+        scenes_bytes = (manifest.parent / name).read_bytes()
+        source = json.loads(scenes_bytes)
+        scenes = source['scenes']
+        fps = source['fps']
+        analyzed = source['analyzed_duration_sec']
+        if (type(fps) not in (int, float) or not math.isfinite(fps) or fps <= 0
+                or type(analyzed) not in (int, float) or not math.isfinite(analyzed) or analyzed <= 0
+                or not scenes or source['total_scenes'] != len(scenes)
+                or data['scene_count'] != len(scenes)
+                or source['media_id'] != data['media']['media_id']
+                or abs(data['media']['video']['fps'] - fps) > .001
+                or analyzed > data['media']['duration_sec'] + 1 / fps + .003):
+            raise ValueError('invalid_source')
+        fields = ('index', 'start_sec', 'end_sec', 'duration_sec', 'start_frame',
+                  'end_frame', 'start_timecode', 'end_timecode')
+        previous_sec, previous_frame = 0, 0
+        safe_rows = []
+        for index, row in enumerate(scenes, 1):
+            for key in ('start_sec', 'end_sec', 'duration_sec'):
+                if type(row[key]) not in (int, float) or not math.isfinite(row[key]):
+                    raise ValueError('invalid_number')
+            if (type(row['index']) is not int or row['index'] != index
+                    or type(row['start_frame']) is not int or type(row['end_frame']) is not int
+                    or row['end_sec'] <= row['start_sec'] or row['end_frame'] <= row['start_frame']
+                    or abs(row['start_sec'] - previous_sec) > .003
+                    or row['start_frame'] != previous_frame
+                    or abs(row['duration_sec'] - (row['end_sec'] - row['start_sec'])) > .003):
+                raise ValueError('invalid_interval')
+            for prefix in ('start', 'end'):
+                tc = row[prefix + '_timecode']
+                if not isinstance(tc, str) or not re.fullmatch(r'\d{2,}:\d{2}:\d{2}:\d{2}', tc):
+                    raise ValueError('invalid_timecode')
+                h, m, s, f = map(int, tc.split(':'))
+                if m >= 60 or s >= 60 or f >= math.ceil(fps):
+                    raise ValueError('invalid_timecode')
+                seconds = row[prefix + '_sec']
+                if (abs(seconds * fps - row[prefix + '_frame']) > 1.01
+                        or abs(h*3600 + m*60 + s + f/fps - seconds) > 1/fps + .003):
+                    raise ValueError('invalid_frame')
+            previous_sec, previous_frame = row['end_sec'], row['end_frame']
+            if 81 <= index <= 84:
+                safe_rows.append({key: row[key] for key in fields})
+        if abs(previous_sec - analyzed) > 1/fps + .003:
+            raise ValueError('invalid_end')
+        durations = [row['duration_sec'] for row in scenes]
+        statistics = {'total_scenes': len(scenes), 'total_duration_sec': round(sum(durations), 3),
+            'average_duration_sec': round(sum(durations)/len(scenes), 2),
+            'min_duration_sec': round(min(durations), 2), 'max_duration_sec': round(max(durations), 2),
+            'longest_scene_index': max(scenes, key=lambda row: row['duration_sec'])['index']}
+        return {'statistics': statistics, 'adjacent_scenes': safe_rows, 'fps': fps,
+            'analyzed_duration_sec': analyzed, 'source_scenes_sha256': hashlib.sha256(scenes_bytes).hexdigest(),
+            'source_media_manifest_sha256': hashlib.sha256(manifest_bytes).hexdigest(),
+            'preview_image_count': 0, 'numeric_validation': 'passed', 'human_visual_review': 'not_verified'}
+    except Exception:
+        raise RuntimeError('stage1_numeric_failed') from None
+
+
 def execute(task, output, config_path):
     validate_task(task)
     result = {'task_id': task['task_id'], 'mode': task['mode'], 'nonce': task['nonce'],
@@ -125,6 +199,8 @@ def execute(task, output, config_path):
                 probe = Path(folder) / 'challenge.txt'
                 probe.write_text(task['nonce'], encoding='ascii')
                 result['probe_sha256'] = hashlib.sha256(probe.read_bytes()).hexdigest()
+        elif task['mode'] == 'stage1-numeric':
+            result.update(numeric_check(config_path or LOCAL_CONFIG))
         else:
             result.update(preview(config_path or LOCAL_CONFIG, output / 'local-preview'))
         result['execution_status'] = 'completed'

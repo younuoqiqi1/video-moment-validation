@@ -55,7 +55,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/checkout@v4
-        if: needs.validate.outputs.mode == 'stage1-preview'
+        if: needs.validate.outputs.mode == 'stage1-preview' || needs.validate.outputs.mode == 'stage1-numeric'
         with:
           ref: ${{ needs.validate.outputs.code_sha }}
           path: target
