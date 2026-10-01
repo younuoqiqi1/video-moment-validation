@@ -770,8 +770,9 @@ def run_stage1_media_import(
         "fps": fps,
         "total_scenes": len(scenes),
         "analyzed_duration_sec": max_duration_sec if (max_duration_sec and max_duration_sec < media_info.duration_sec) else media_info.duration_sec,
-        "detector": {"version": 2, "mode": scene_mode, "threshold": scene_threshold,
+        "detector": {"version": 3, "mode": scene_mode, "threshold": scene_threshold,
                      "adaptive_floor": .04, "adaptive_ratio": 3.0, "window_sec": 1.0,
+                     "fade_trough_max_luma": 20, "fade_recovery_luma": 12,
                      "min_scene_duration": .5},
         "scenes": [s.to_dict() for s in scenes],
     }
@@ -803,4 +804,3 @@ def run_stage1_media_import(
             "subtitles": media_info.subtitle_summary,
         },
     )
-

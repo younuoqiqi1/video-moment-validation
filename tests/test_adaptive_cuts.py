@@ -35,6 +35,37 @@ def test_dark_low_contrast_composition_cut_below_old_floor(tmp_path):
     assert scenes[0].end_frame == scenes[1].start_frame
 
 
+@pytest.mark.parametrize('luminance', [
+    'if(lt(N,50),if(lt(X,80),20,24),if(lt(X,80),24,20))',
+    'if(lt(N,50),40-N/3,28)',
+])
+def test_dark_spatial_cut_and_cut_after_fade_recover_boundary(tmp_path, luminance):
+    # Same mean brightness, different spatial layout; or a cut after fading.
+    # The physical edit is at frame 50, independently of detector output.
+    video = fixture(tmp_path, luminance)
+    assert [s.start_frame for s in detect_scenes(video, 4)] == [0, 50]
+    assert [s.start_frame for s in detect_scenes(video, 4, mode='fixed')] == [0]
+
+
+@pytest.mark.parametrize('luminance', [
+    '40-N/4', '22+mod(N,2)', 'if(eq(N,50),26,22)',
+    'if(lt(mod(X+N,160),80),20,24)',
+])
+def test_dark_fade_noise_and_flash_are_not_cuts(tmp_path, luminance):
+    assert [s.start_frame for s in detect_scenes(fixture(tmp_path, luminance), 4)] == [0]
+
+
+def test_fade_through_black_has_one_transition_candidate(tmp_path):
+    video = fixture(tmp_path,
+        '16+min(30,abs(N-50))*1.0+if(lt(N,50),if(lt(X,80),2,0),if(lt(X,80),0,2))')
+    assert [s.start_frame for s in detect_scenes(video, 4)] == [0, 50]
+
+
+def test_one_frame_black_pulse_is_not_a_fade_transition(tmp_path):
+    assert [s.start_frame for s in detect_scenes(
+        fixture(tmp_path, 'if(eq(N,50),16,46)'), 4)] == [0]
+
+
 def test_fixed_mode_preserves_baseline_for_comparison(tmp_path):
     video = fixture(tmp_path, 'if(lt(N,50),80,92)')
     assert len(detect_scenes(video, 4, mode='fixed')) == 1

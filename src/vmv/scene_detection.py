@@ -28,18 +28,19 @@ def read_frame_scores(video: Path, duration: float):
             frames.setdefault(current, {'time': float(header[2])})
         elif current is not None and '=' in line:
             key, value = line.split('=', 1)
-            if key in ('lavfi.scene_score', 'lavfi.signalstats.YDIF'):
+            if key in ('lavfi.scene_score', 'lavfi.signalstats.YDIF', 'lavfi.signalstats.YAVG'):
                 frames[current][key] = float(value)
     rows = []
     for index, item in sorted(frames.items()):
         score = item.get('lavfi.scene_score')
         delta = item.get('lavfi.signalstats.YDIF')
-        if score is None or delta is None or not all(
-                math.isfinite(v) and v >= 0 for v in (item['time'], score, delta)):
+        brightness = item.get('lavfi.signalstats.YAVG')
+        if score is None or delta is None or brightness is None or not all(
+                math.isfinite(v) and v >= 0 for v in (item['time'], score, delta, brightness)):
             raise ValueError('帧变化分数缺失或无效')
         if index != len(rows):
             raise ValueError('帧变化分数不连续')
-        rows.append((item['time'], score, delta / 100))
+        rows.append((item['time'], score, delta / 100, brightness))
     if not rows:
         raise ValueError('未读取到帧变化分数')
     return rows
@@ -55,7 +56,7 @@ def select_cutpoints(rows, fps, duration, threshold=.35, mode='adaptive',
     """
     radius = max(1, round(fps))
     candidates = []
-    for i, (time, score, delta) in enumerate(rows):
+    for i, (time, score, delta, brightness) in enumerate(rows):
         if not 0 < time < duration:
             continue
         if mode == 'adaptive' and duration-time < min_duration:
@@ -72,6 +73,20 @@ def select_cutpoints(rows, fps, duration, threshold=.35, mode='adaptive',
             peak = ((i == 0 or score > rows[i-1][1])
                     and (i+1 == len(rows) or score >= rows[i+1][1]))
             accepted = peak and (score > threshold or score >= max(floor, ratio*background))
+            # A gradual fade has no large single-frame score. Treat its
+            # sustained near-black trough as a transition candidate. Require
+            # recovery on both sides and smooth adjacent steps, so a single
+            # black pulse, monotonic fade or permanently dark shot is excluded.
+            before = [r[3] for r in rows[max(0, i-radius):i]]
+            after = [r[3] for r in rows[i+1:i+radius+1]]
+            fade = (bool(before) and bool(after) and brightness <= 20
+                and brightness < min(before) and brightness <= min(after)
+                and rows[i-1][3] <= 24 and rows[i+1][3] <= 24
+                and abs(rows[i-1][3]-brightness) <= 6
+                and abs(rows[i+1][3]-brightness) <= 6
+                and max(before) >= brightness+12
+                and max(after) >= brightness+12)
+            accepted = accepted or fade
             if (accepted and i+2 < len(rows) and delta >= floor
                     and rows[i+1][2] >= .8*delta and rows[i+2][2] <= .2*delta):
                 accepted = False

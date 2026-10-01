@@ -87,8 +87,9 @@ def rerun(video, manifest, source_scenes, reference_path, output, *, progress=la
     candidate = output / source_scenes.name
     candidate.write_text(json.dumps({'media_id': media.media_id, 'fps': fps,
         'analyzed_duration_sec': analyzed, 'total_scenes': len(after),
-        'detector': {'version': 2, 'mode': 'adaptive', 'threshold': .35,
+        'detector': {'version': 3, 'mode': 'adaptive', 'threshold': .35,
             'adaptive_floor': .04, 'adaptive_ratio': 3, 'window_sec': 1,
+            'fade_trough_max_luma': 20, 'fade_recovery_luma': 12,
             'min_scene_duration': .5},
         'scenes': [s.to_dict() for s in after]}, ensure_ascii=False, indent=2))
     generate_summary_html(media, after, output / 'summary.html')
