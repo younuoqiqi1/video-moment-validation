@@ -13,9 +13,9 @@ def read_frame_scores(video: Path, duration: float):
         raise ValueError('未找到 ffmpeg')
     # YDIF is needed because select's scene score can be zero on a flash's
     # return frame. Decode original frames (no sampling or scaling).
-    filters = ("signalstats,select='gte(scene,0)',"
-        "metadata=print:key=lavfi.scene_score:file=-,"
-        "metadata=print:key=lavfi.signalstats.YDIF:file=-")
+    # One AVIO writer is essential: two metadata writers buffer independently
+    # and interleave headers/value lines once stdout exceeds their buffers.
+    filters = "signalstats,select='gte(scene,0)',metadata=print:file=-"
     result = subprocess.run([ffmpeg, '-nostdin', '-v', 'error', '-t', str(duration),
         '-i', str(video), '-map', '0:v:0', '-an', '-sn', '-vf', filters,
         '-f', 'null', '-'], capture_output=True, text=True, check=True, timeout=2700)

@@ -83,3 +83,6 @@
 ## 2026-10-01 Codex 漏切修正交付
 
 代码增加自适应候选检测、旧算法对照和安全复验入口，完整测试 54/54。报告：`reports/stage1-codex-cut-repair.md`；Mac 任务：`tasks/stage1-cut-recheck.md`。真实素材命中与误切数据待回执；维持总完成度 10%、阶段 1 需要修改 / awaiting_review，未授权阶段 2。
+
+
+2026-10-01 复跑故障修正：用100秒、2500帧的实际FFmpeg合成素材独立复现双 metadata stdout 写入器的缓冲交错，造成帧分数缺失。改成一个 metadata 输出器；同一回归由失败转为通过，完整检查57/57通过。真实Mac复验尚未完成，仍保持阶段1 needs_changes / awaiting_review；不认定用户验收，不进入阶段2。

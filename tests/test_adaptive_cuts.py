@@ -63,3 +63,17 @@ def test_incomplete_or_nonmonotonic_scores_cannot_claim_full_coverage(monkeypatc
 @pytest.mark.parametrize('frame', [98,99])
 def test_endpoint_flash_is_not_a_tiny_final_scene(tmp_path, frame):
     assert len(detect_scenes(fixture(tmp_path, f'if(eq(N,{frame}),180,80)'), 4)) == 1
+
+
+def test_long_metadata_output_has_no_interleaved_writers(tmp_path):
+    import subprocess
+    from vmv.scene_detection import read_frame_scores
+    video = tmp_path / 'metadata-buffer.mkv'
+    subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i',
+        'testsrc2=s=32x32:r=25:d=100', '-c:v', 'ffv1', str(video)],
+        capture_output=True, check=True)
+    rows = read_frame_scores(video, 100)
+    assert len(rows) == 2500
+    assert rows[0][0] == 0
+    assert rows[-1][0] == 99.96
+    assert all(right[0] > left[0] for left, right in zip(rows, rows[1:]))
