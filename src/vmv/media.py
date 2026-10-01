@@ -345,7 +345,12 @@ def detect_scenes(
                 or abs(rows[-1][0] + 1/fps - effective_duration) > tolerance
                 or any(not 0 < right[0]-left[0] <= 1.5/fps
                        for left, right in zip(rows, rows[1:]))):
-            raise ValueError("帧时间戳或分析范围覆盖不完整（需要恒定帧率素材）")
+            exc = ValueError("帧时间戳或分析范围覆盖不完整（需要恒定帧率素材）")
+            exc.safe_code = 'incomplete_coverage'
+            exc.safe_numbers = {'score_frame_count': len(rows),
+                'first_score_sec': rows[0][0] if rows else 0,
+                'last_score_sec': rows[-1][0] if rows else 0}
+            raise exc
         filtered_cuts = select_cutpoints(rows, fps, effective_duration, threshold,
                                          mode, min_duration=min_scene_duration)
     except (ValueError, subprocess.SubprocessError, OSError) as exc:

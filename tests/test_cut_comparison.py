@@ -95,3 +95,16 @@ def test_failed_cli_reports_safe_stage_without_private_error(tmp_path, monkeypat
     assert data['failure_stage'] == 'fixed_detection'
     assert data['error_code'] == 'invalid_data'
     assert 'SECRET_TOKEN' not in json.dumps(data)
+
+
+def test_safe_diagnostic_preserves_coverage_numbers_only():
+    import vmv.cut_comparison as m
+    from vmv.media import MediaProbeError
+    cause = ValueError('/private/SECRET_TOKEN')
+    cause.safe_code = 'incomplete_coverage'
+    cause.safe_numbers = {'score_frame_count': 44999, 'first_score_sec': .04,
+        'last_score_sec': 1799.96, 'private_path': '/private/media'}
+    outer = MediaProbeError('/private/SECRET_TOKEN')
+    outer.__cause__ = cause
+    assert m.failure_diagnostic(outer) == {'error_code': 'incomplete_coverage',
+        'score_frame_count': 44999, 'first_score_sec': .04, 'last_score_sec': 1799.96}

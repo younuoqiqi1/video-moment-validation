@@ -1,6 +1,8 @@
 """Local-only stage 1 rerun; safe numbers do not imply visual acceptance."""
 import argparse
 import json
+import math
+import subprocess
 from pathlib import Path
 
 from vmv.media import detect_scenes, scene_statistics, generate_summary_html
@@ -106,6 +108,30 @@ def rerun(video, manifest, source_scenes, reference_path, output, *, progress=la
     return result
 
 
+def failure_diagnostic(exc):
+    cause = exc.__cause__ or exc
+    codes = {'incomplete_coverage'}
+    if getattr(cause, 'safe_code', None) in codes:
+        result = {'error_code': cause.safe_code}
+        for key, value in getattr(cause, 'safe_numbers', {}).items():
+            if key in {'score_frame_count', 'first_score_sec', 'last_score_sec'} and type(value) in (int, float) and math.isfinite(value):
+                result[key] = value
+        return result
+    if isinstance(cause, subprocess.CalledProcessError):
+        return {'error_code': 'ffmpeg_process_failed'}
+    if isinstance(cause, subprocess.TimeoutExpired):
+        return {'error_code': 'ffmpeg_timeout'}
+    known = {'未找到 ffmpeg': 'ffmpeg_missing',
+        '帧变化分数缺失或无效': 'invalid_frame_scores',
+        '帧变化分数不连续': 'noncontiguous_frame_scores',
+        '未读取到帧变化分数': 'empty_frame_scores'}
+    if isinstance(cause, ValueError) and str(cause) in known:
+        return {'error_code': known[str(cause)]}
+    return {'error_code': ('missing_input' if isinstance(exc, FileNotFoundError) else
+        'output_exists' if isinstance(exc, FileExistsError) else
+        'invalid_data' if isinstance(exc, ValueError) else 'execution_error')}
+
+
 def main():
     parser = argparse.ArgumentParser(description='阶段 1 漏切修正本机对照')
     for name in ('video', 'manifest', 'scenes', 'reference', 'output'):
@@ -120,11 +146,8 @@ def main():
         result = rerun(args.video, args.manifest, args.scenes, args.reference, args.output, progress=progress)
     except Exception as exc:
         # Fixed codes only: exception messages may contain source paths/logs.
-        code = ('missing_input' if isinstance(exc, FileNotFoundError) else
-                'output_exists' if isinstance(exc, FileExistsError) else
-                'invalid_data' if isinstance(exc, ValueError) else 'execution_error')
         print(json.dumps({'execution_status': 'failed', 'failure_stage': stage,
-                          'error_code': code}), flush=True)
+                          **failure_diagnostic(exc)}), flush=True)
         return 1
     print(json.dumps(result, ensure_ascii=False))
     return 0
