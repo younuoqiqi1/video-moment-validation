@@ -1,3 +1,12 @@
+## 最新续做入口（2026-10-01，Codex 低分数漏切修正）
+
+- 当前修正代码 SHA：`abb5f973f2b7cc07ee3eaf743d05f2f24f54af2c`。合成图案复现了旧绝对下限0.06漏掉分数0.0465的边界；新下限0.04，Codex合成复验通过。
+- 固定 Mac 复跑已派发，GitHub Actions run [36890338194](https://github.com/younuoqiqi1/video-moment-validation/actions/runs/36890338194) 目前为 queued；只有 self-hosted Mac job 实际运行/完成才算开始/完成证据。
+- 运行结果必须核对 `code_sha=abb5...`、安全 comparison 数值及本机新预览。重点核用户截图报告的 **34343帧（1373.72秒）与34493帧（1379.72秒）**，以及旧参考点35297帧、14个已登记参考和所有新增/移除候选。截图观察来源是用户转交的 AGY 画面反馈，Codex尚未独立看过原片。
+- 如果任务未能在 Mac runner 上开始，报告具体 Actions 状态/阻塞；不要把排队说成已开始。真实素材和帧图只留 Mac 本机，阶段1保持 awaiting_review。
+
+---
+
 # AGY 本机任务：阶段 1 漏切修正复验
 
 已授权，不重复询问是否开始。Codex 负责此次编码，官方 Mac 执行器负责固定版本复跑；AGY 负责本机画面观察。严格限于阶段 1。
