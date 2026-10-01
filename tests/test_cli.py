@@ -510,3 +510,42 @@ def test_status_cli_output_path_embedded_null_is_reported(tmp_path: Path):
     bad_path = Path("bad\0name.json")
     with pytest.raises(OSError, match="路径解析失败"):
         validate_output_paths(bad_path)
+
+
+def test_cli_import_empty_directory_returns_1(tmp_path: Path):
+    """Verify vmv import returns 1 and prints blocked reason when directory is empty."""
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
+    out_dir = tmp_path / "stage1_out"
+
+    exit_code = main(["import", "--input", str(empty_dir), "--output", str(out_dir)])
+    assert exit_code == 1
+
+
+def test_cli_import_success_mock(tmp_path: Path):
+    """Verify vmv import command parses arguments and executes successfully."""
+    from unittest.mock import patch
+    from vmv.stages import StageResult
+
+    fake_result = StageResult(
+        stage="stage1",
+        status="passed",
+        artifacts=["outputs/stage1/media_manifest.json"],
+        details={
+            "media_id": "fake_vid_720p_25fps",
+            "filename": "fake.mp4",
+            "duration_timecode": "00:05:00:00",
+            "duration_sec": 300.0,
+            "resolution": "1280x720",
+            "fps": 25.0,
+            "video_codec": "h264",
+            "audio_codec": "aac",
+            "subtitles": "无软字幕",
+            "total_scenes": 15,
+        }
+    )
+
+    with patch("vmv.cli.run_stage1_media_import", return_value=fake_result):
+        exit_code = main(["import", "--input", str(tmp_path), "--output", str(tmp_path / "out")])
+        assert exit_code == 0
+
