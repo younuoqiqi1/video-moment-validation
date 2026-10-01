@@ -49,7 +49,7 @@ jobs:
     name: Execute on user Mac
     needs: validate
     runs-on: [self-hosted, macOS, vmv-mac]
-    timeout-minutes: 50
+    timeout-minutes: ${{ needs.validate.outputs.mode == 'stage1-numeric' && 6 || 50 }}
     steps:
       - uses: actions/checkout@v4
         with:

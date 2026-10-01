@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "task_id": "stage1-numeric-only-20261001-1700",
+  "task_id": "stage1-numeric-bounded-20261001-1810",
   "mode": "stage1-numeric",
-  "nonce": "4448340b2b84ea045bcc2606c735b332c98686c22bb4cc9c4e70d3fd700febb7",
+  "nonce": "3d923811e14d6050955cf4c1f588ef30f97b38ef07b995ecec2e07101bb85e28",
   "pr_number": 5,
   "code_sha": "39c48d9a87167decb3ab53d5da5d79d6e3bd9c05"
 }

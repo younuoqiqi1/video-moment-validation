@@ -6,7 +6,9 @@ import math
 import os
 import platform
 import re
+import signal
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +16,50 @@ from pathlib import Path
 REPO = 'younuoqiqi1/video-moment-validation'
 STAGE1_SHA = '39c48d9a87167decb3ab53d5da5d79d6e3bd9c05'
 LOCAL_CONFIG = Path.home() / '.local/share/vmv-actions-runner/vmv-local.json'
+
+
+def run_process(command, *, timeout, env=None, cwd=None):
+    # File-backed stdout avoids communicate() waiting forever on an inherited pipe.
+    with tempfile.TemporaryFile() as stdout:
+        process = subprocess.Popen(command, stdout=stdout, stderr=subprocess.DEVNULL,
+                                   env=env, cwd=cwd, start_new_session=True)
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                pass
+            stdout.seek(0)
+            raise subprocess.TimeoutExpired(command, timeout,
+                                            output=stdout.read().decode('utf-8', errors='replace')) from None
+        stdout.seek(0)
+        return subprocess.CompletedProcess(command, process.returncode,
+                                           stdout.read().decode('utf-8', errors='replace'), '')
+
+
+def checkpoint(name):
+    print('checkpoint:' + name, flush=True)
+
+
+def bounded_numeric_check(config_path):
+    try:
+        process = run_process([sys.executable, str(Path(__file__).resolve()),
+                               '--numeric-worker', str(config_path)], timeout=60)
+    except subprocess.TimeoutExpired as exc:
+        stages = ('read_config', 'resolve_root', 'verify_code', 'read_manifest',
+                  'read_scenes', 'validate_intervals', 'numeric_complete')
+        seen = [line.split(':', 1)[1] for line in (exc.output or '').splitlines()
+                if line.startswith('checkpoint:') and line.split(':', 1)[1] in stages]
+        return {'execution_status': 'blocked', 'error_code': 'numeric_timeout',
+                'checkpoint': seen[-1] if seen else 'numeric_worker'}
+    if process.returncode:
+        return {'execution_status': 'failed', 'error_code': 'stage1_numeric_failed'}
+    return json.loads(process.stdout.splitlines()[-1])
 
 
 def validate_task(task):
@@ -38,7 +84,7 @@ def gh_json(args):
     env = dict(os.environ)
     env.pop('GH_TOKEN', None)
     env.pop('GITHUB_TOKEN', None)
-    process = subprocess.run(['gh', *args], capture_output=True, text=True, env=env, timeout=60)
+    process = run_process(['gh', *args], env=env, timeout=60)
     if process.returncode:
         raise RuntimeError('github_request_failed')
     return json.loads(process.stdout)
@@ -63,7 +109,7 @@ def post_receipt(task, result, phase):
     for key in ('completed_at', 'probe_sha256', 'statistics', 'preview_image_count',
                 'numeric_validation', 'human_visual_review', 'error_code',
                 'adjacent_scenes', 'source_scenes_sha256', 'source_media_manifest_sha256',
-                'fps', 'analyzed_duration_sec'):
+                'fps', 'analyzed_duration_sec', 'checkpoint', 'blocked_at_checkpoint'):
         if key in result:
             proof[key] = result[key]
     body = f'{marker}\nAGY 协同回执：{text}（GitHub 官方执行器）\n\n'
@@ -111,17 +157,22 @@ def preview(config_path, output):
 def numeric_check(config_path):
     """Read the entire original JSON without opening, hashing or decoding video."""
     try:
+        checkpoint('read_config')
         config = json.loads(config_path.read_text(encoding='utf-8'))
+        checkpoint('verify_code')
         target = Path('target').resolve()
         if subprocess.check_output(['git', '-C', str(target), 'rev-parse', 'HEAD'],
                                    text=True, timeout=10).strip() != STAGE1_SHA:
             raise ValueError('wrong_code_revision')
+        checkpoint('resolve_root')
         manifest = Path(config['project_root']).resolve() / 'outputs/stage1/media_manifest.json'
+        checkpoint('read_manifest')
         manifest_bytes = manifest.read_bytes()
         data = json.loads(manifest_bytes)
         name = data['scene_manifest_file']
         if not isinstance(name, str) or Path(name).name != name or not name.endswith('.json'):
             raise ValueError('invalid_scene_manifest')
+        checkpoint('read_scenes')
         scenes_bytes = (manifest.parent / name).read_bytes()
         source = json.loads(scenes_bytes)
         scenes = source['scenes']
@@ -137,6 +188,7 @@ def numeric_check(config_path):
             raise ValueError('invalid_source')
         fields = ('index', 'start_sec', 'end_sec', 'duration_sec', 'start_frame',
                   'end_frame', 'start_timecode', 'end_timecode')
+        checkpoint('validate_intervals')
         previous_sec, previous_frame = 0, 0
         safe_rows = []
         for index, row in enumerate(scenes, 1):
@@ -171,6 +223,7 @@ def numeric_check(config_path):
             'average_duration_sec': round(sum(durations)/len(scenes), 2),
             'min_duration_sec': round(min(durations), 2), 'max_duration_sec': round(max(durations), 2),
             'longest_scene_index': max(scenes, key=lambda row: row['duration_sec'])['index']}
+        checkpoint('numeric_complete')
         return {'statistics': statistics, 'adjacent_scenes': safe_rows, 'fps': fps,
             'analyzed_duration_sec': analyzed, 'source_scenes_sha256': hashlib.sha256(scenes_bytes).hexdigest(),
             'source_media_manifest_sha256': hashlib.sha256(manifest_bytes).hexdigest(),
@@ -188,6 +241,12 @@ def execute(task, output, config_path):
         'execution_status': 'started', 'notification_status': 'sent'}
     if result['platform'] != 'Darwin':
         return dict(result, execution_status='blocked', notification_status='not_sent', error_code='not_macos')
+    output.mkdir(parents=True, exist_ok=True)
+    def save_progress(stage):
+        result['checkpoint'] = stage
+        (output / 'result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+        checkpoint(stage)
+    save_progress('receipt_started')
     try:
         post_receipt(task, result, 'started')
     except Exception:
@@ -200,13 +259,18 @@ def execute(task, output, config_path):
                 probe.write_text(task['nonce'], encoding='ascii')
                 result['probe_sha256'] = hashlib.sha256(probe.read_bytes()).hexdigest()
         elif task['mode'] == 'stage1-numeric':
-            result.update(numeric_check(config_path or LOCAL_CONFIG))
+            save_progress('numeric_worker')
+            result.update(bounded_numeric_check(config_path or LOCAL_CONFIG))
         else:
             result.update(preview(config_path or LOCAL_CONFIG, output / 'local-preview'))
-        result['execution_status'] = 'completed'
+        if result['execution_status'] == 'started':
+            result['execution_status'] = 'completed'
     except Exception:
         result.update(execution_status='failed', error_code='execution_failed')
     result['completed_at'] = datetime.now(timezone.utc).isoformat()
+    if result.get('error_code') == 'numeric_timeout':
+        result['blocked_at_checkpoint'] = result['checkpoint']
+    save_progress('receipt_' + result['execution_status'])
     try:
         post_receipt(task, result, result['execution_status'])
     except Exception:
@@ -216,11 +280,15 @@ def execute(task, output, config_path):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task', type=Path, required=True)
+    parser.add_argument('--task', type=Path)
+    parser.add_argument('--numeric-worker', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--output', type=Path, default=Path('data/work/actions-result'))
     parser.add_argument('--validate-only', action='store_true')
     args = parser.parse_args()
     try:
+        if args.numeric_worker is not None:
+            print(json.dumps(numeric_check(args.numeric_worker), ensure_ascii=False), flush=True)
+            return 0
         task = validate_task(json.loads(args.task.read_text(encoding='utf-8')))
         if args.validate_only:
             return 0
