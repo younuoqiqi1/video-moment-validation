@@ -73,6 +73,12 @@ def select_cutpoints(rows, fps, duration, threshold=.35, mode='adaptive',
             peak = ((i == 0 or score > rows[i-1][1])
                     and (i+1 == len(rows) or score >= rows[i+1][1]))
             accepted = peak and (score > threshold or score >= max(floor, ratio*background))
+            # Lower-floor candidates need a spike in actual frame difference,
+            # not just a change in motion speed (scene is itself differential).
+            if accepted and score < .06:
+                deltas = [r[2] for r in rows[max(0, i-radius):i]]
+                deltas += [r[2] for r in rows[i+1:i+radius+1]]
+                accepted = delta >= ratio * median(deltas) if deltas else True
             # A gradual fade has no large single-frame score. Treat its
             # sustained near-black trough as a transition candidate. Require
             # recovery on both sides and smooth adjacent steps, so a single

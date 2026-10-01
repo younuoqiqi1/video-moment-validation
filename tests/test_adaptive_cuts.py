@@ -66,6 +66,15 @@ def test_one_frame_black_pulse_is_not_a_fade_transition(tmp_path):
         fixture(tmp_path, 'if(eq(N,50),16,46)'), 4)] == [0]
 
 
+def test_continuing_motion_speed_change_is_not_a_low_score_cut():
+    from vmv.scene_detection import select_cutpoints
+    # Sustained inter-frame motion changes speed once: scene-score is a
+    # local peak, but the absolute frame difference continues at that level.
+    rows = [(i/25, .05 if i == 50 else .001,
+             .08 if i < 50 else .13, 50) for i in range(100)]
+    assert select_cutpoints(rows, 25, 4) == []
+
+
 def test_fixed_mode_preserves_baseline_for_comparison(tmp_path):
     video = fixture(tmp_path, 'if(lt(N,50),80,92)')
     assert len(detect_scenes(video, 4, mode='fixed')) == 1
