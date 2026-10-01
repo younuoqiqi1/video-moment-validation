@@ -1,0 +1,74 @@
+name: Mac local task
+run-name: Mac task · ${{ github.sha }}
+
+# Dedicated dispatch branch: no PR/fork/comment text can execute on the Mac.
+# Push works before this workflow is merged into main.
+on:
+  push:
+    branches: [codex/mac-actions]
+    paths:
+      - tasks/mac-actions/dispatch.json
+      - .github/workflows/mac-local.yml
+      - scripts/mac_actions.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vmv-mac-local
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.repository == 'younuoqiqi1/video-moment-validation' && github.ref == 'refs/heads/codex/mac-actions'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.task.outputs.mode }}
+      code_sha: ${{ steps.task.outputs.code_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate fixed task scope
+        id: task
+        shell: bash
+        run: |
+          python3 scripts/mac_actions.py --task tasks/mac-actions/dispatch.json --validate-only
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          task = json.loads(Path('tasks/mac-actions/dispatch.json').read_text())
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write('mode=' + task['mode'] + '\n')
+              out.write('code_sha=' + task['code_sha'] + '\n')
+          PY
+
+  mac:
+    name: Execute on user Mac
+    needs: validate
+    runs-on: [self-hosted, macOS, vmv-mac]
+    timeout-minutes: ${{ needs.validate.outputs.mode == 'stage1-numeric' && 6 || 50 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        if: needs.validate.outputs.mode == 'stage1-preview' || needs.validate.outputs.mode == 'stage1-numeric' || needs.validate.outputs.mode == 'stage1-cut-check'
+        with:
+          ref: ${{ needs.validate.outputs.code_sha }}
+          path: target
+          persist-credentials: false
+      - name: Execute fixed job and send real Mac receipts
+        shell: bash
+        run: python3 scripts/mac_actions.py --task tasks/mac-actions/dispatch.json
+      - name: Upload safe result only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: data/work/actions-result/${{ github.run_id }}-${{ github.run_attempt }}/result.json
+          if-no-files-found: error
+          retention-days: 7
+
