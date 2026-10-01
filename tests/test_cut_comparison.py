@@ -78,3 +78,20 @@ def test_real_rerun_preserves_sources_and_generates_preview(tmp_path, monkeypatc
     with pytest.raises(ValueError, match='不匹配'):
         rerun(video, manifest, scenes, reference, tmp_path / 'wrong')
     assert not (tmp_path / 'wrong').exists()
+
+
+def test_failed_cli_reports_safe_stage_without_private_error(tmp_path, monkeypatch, capsys):
+    import json
+    import sys
+    import vmv.cut_comparison as m
+    def fail(*args, progress):
+        progress('fixed_detection')
+        raise ValueError('/private/SECRET_TOKEN')
+    monkeypatch.setattr(m, 'rerun', fail)
+    monkeypatch.setattr(sys, 'argv', ['compare', '--video', 'v', '--manifest', 'm',
+        '--scenes', 's', '--reference', 'r', '--output', str(tmp_path)])
+    assert m.main() == 1
+    data = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert data['failure_stage'] == 'fixed_detection'
+    assert data['error_code'] == 'invalid_data'
+    assert 'SECRET_TOKEN' not in json.dumps(data)
