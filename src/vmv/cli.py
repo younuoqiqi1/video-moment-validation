@@ -6,6 +6,7 @@ from pathlib import Path
 
 from vmv.report import run_status_stage
 from vmv.media import run_stage1_media_import
+from vmv.preview import run_stage1_preview
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -67,6 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="镜头场景切分敏感度阈值 (默认: 0.35)",
     )
 
+    preview_parser = subparsers.add_parser("preview", help="核对现有完整 JSON 并生成本机画面预览")
+    preview_parser.add_argument("--media-manifest", type=Path, required=True)
+    preview_parser.add_argument("--scenes", type=Path, required=True)
+    preview_parser.add_argument("--video", type=Path, required=True)
+    preview_parser.add_argument("--output", type=Path, default=Path("outputs/stage1/preview"))
     return parser
 
 
@@ -94,6 +100,19 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
         print("\n所有环境依赖检查通过，等待阶段验收。")
+        return 0
+
+    elif args.command == "preview":
+        result = run_stage1_preview(args.media_manifest, args.scenes, args.video, args.output)
+        if result.status != "passed":
+            for error in result.errors:
+                print(error)
+            return 1
+        stats = result.details["statistics"]
+        print(f"完整清单数值核对通过：{stats['total_scenes']} 条；最长 {stats['max_duration_sec']} 秒。")
+        print("画面预览已生成；真实镜头质量仍需查看图片确认。")
+        for artifact in result.artifacts:
+            print(artifact)
         return 0
 
     elif args.command == "import":

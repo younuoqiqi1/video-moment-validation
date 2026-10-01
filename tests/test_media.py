@@ -18,6 +18,7 @@ from vmv.media import (
     MediaProbeError,
     MediaInfo,
     VideoStreamInfo,
+    SceneItem,
 )
 
 
@@ -215,3 +216,29 @@ def test_generate_summary_html_escapes_untrusted_media_text(tmp_path: Path):
     assert "<img src=x onerror=alert(1)>" not in rendered
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in rendered
     assert "&lt;img src=x onerror=alert(1)&gt;" in rendered
+
+
+def test_summary_shows_all_130_intervals_and_full_statistics(tmp_path):
+    media = MediaInfo(
+        media_id="sample", filename="sample.mp4", relative_path="sample.mp4",
+        file_size_bytes=1, file_size_mb=0, duration_sec=597.96,
+        duration_timecode="00:09:57:24", format_name="mp4", video=None,
+        audio=None, subtitles=[], subtitle_summary="待核对",
+    )
+    scenes = []
+    start = 0.0
+    for index in range(1, 131):
+        duration = 210.96 if index == 101 else 3.0
+        end = round(start + duration, 3)
+        scenes.append(SceneItem(index, start, seconds_to_timecode(start), end,
+                                seconds_to_timecode(end), duration,
+                                round(start * 25), round(end * 25)))
+        start = end
+    output = tmp_path / "summary.html"
+    generate_summary_html(media, scenes, output)
+    rendered = output.read_text()
+    assert "#101" in rendered
+    assert "#130" in rendered
+    assert rendered.count("<tr>") == 131  # 130 rows and one heading
+    assert "最长 210.96s" in rendered
+    assert "前 100" not in rendered

@@ -294,7 +294,7 @@ def probe_media_file(file_path: Path, repo_root: Path | None = None) -> MediaInf
     if subtitles:
         subtitle_summary = f"检测到 {len(subtitles)} 个软字幕轨 (" + ", ".join(s.codec for s in subtitles) + ")"
     else:
-        subtitle_summary = "无软字幕轨 (原片为内嵌硬字幕/烧录字幕)"
+        subtitle_summary = "未检测到软字幕轨；画面内字幕需查看视频确认"
 
     rel_path = str(file_path.relative_to(repo_root)) if repo_root and file_path.is_relative_to(repo_root) else file_path.name
     media_id = generate_stable_media_id(file_path, video_info)
@@ -405,23 +405,47 @@ def detect_scenes(
     return scenes
 
 
+def scene_statistics(scenes: list[SceneItem]) -> dict[str, Any]:
+    """Use the complete list for every displayed/exported statistic."""
+    durations = [s.duration_sec for s in scenes]
+    return {
+        "total_scenes": len(scenes),
+        "total_duration_sec": round(sum(durations), 3),
+        "average_duration_sec": round(sum(durations) / len(scenes), 2) if scenes else 0,
+        "min_duration_sec": round(min(durations), 2) if scenes else 0,
+        "max_duration_sec": round(max(durations), 2) if scenes else 0,
+        "longest_scene_index": max(scenes, key=lambda s: s.duration_sec).index if scenes else None,
+    }
+
+
 def generate_summary_html(
     media: MediaInfo,
     scenes: list[SceneItem],
     output_html: Path,
+    previews: dict[int, list[dict[str, Any]]] | None = None,
+    source_note: str = "",
 ) -> None:
     """Generate pure, clean, professional verification HTML report."""
     output_html.parent.mkdir(parents=True, exist_ok=True)
 
     # Calculate scene stats
-    total_scenes = len(scenes)
-    durations = [sc.duration_sec for sc in scenes] if scenes else [0]
-    avg_scene_dur = round(sum(durations) / max(total_scenes, 1), 2)
-    min_scene_dur = round(min(durations), 2) if durations else 0
-    max_scene_dur = round(max(durations), 2) if durations else 0
+    stats = scene_statistics(scenes)
+    total_scenes = stats["total_scenes"]
+    avg_scene_dur = stats["average_duration_sec"]
+    min_scene_dur = stats["min_duration_sec"]
+    max_scene_dur = stats["max_duration_sec"]
 
     scene_rows = []
-    for sc in scenes[:100]:  # Render up to 100 scenes in preview table
+    for sc in scenes:
+        images = (previews or {}).get(sc.index, [])
+        preview_html = "".join(
+            f'<a href="{escape(str(p["file"]), quote=True)}" target="_blank">'
+            f'<img loading="lazy" width="160" src="{escape(str(p["file"]), quote=True)}" '
+            f'alt="区间 {sc.index}，{p["time_sec"]:.3f} 秒"></a>'
+            f'<small>{p["time_sec"]:.3f}s</small>' for p in images
+        ) or "待生成预览"
+        if len(images) > 1:
+            preview_html = f'<details><summary>重点核对：{len(images)} 处画面</summary>{preview_html}</details>'
         scene_rows.append(
             f"""<tr>
                 <td>#{sc.index:03d}</td>
@@ -429,6 +453,7 @@ def generate_summary_html(
                 <td><code>{sc.end_timecode}</code></td>
                 <td>{sc.duration_sec:.2f}s</td>
                 <td>{sc.start_frame} ~ {sc.end_frame}</td>
+                <td>{preview_html}</td>
             </tr>"""
         )
 
@@ -566,7 +591,7 @@ def generate_summary_html(
         <header>
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <h1>阶段 1 素材导入与时间码清单</h1>
-                <span class="badge">PROBE PASSED</span>
+                <span class="badge">清单已生成 · 画面待核对</span>
             </div>
             <p style="color: var(--text-secondary); margin-top: 6px;">
                 素材: <strong>{filename}</strong> (ID: <code>{media_id}</code>)
@@ -619,8 +644,9 @@ def generate_summary_html(
             </div>
         </section>
 
-        <h2 style="font-size: 20px; font-weight: 600; margin-top: 32px; margin-bottom: 8px;">镜头时间码清单 (前 100 项预览)</h2>
-        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;">完整清单已导出至 <code>outputs/stage1/scenes_{media_id}.json</code></p>
+        <h2 style="font-size: 20px; font-weight: 600; margin-top: 32px; margin-bottom: 8px;">候选区间清单（完整 {total_scenes} 项）</h2>
+        <p>根据画面变化生成候选区间，时长不固定；长区间可能是长镜头，也可能有漏切，需看画面确认。帧区间按起点包含、终点不包含计。</p>
+        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;">{escape(source_note, quote=True)}</p>
 
         <table>
             <thead>
@@ -630,6 +656,7 @@ def generate_summary_html(
                     <th>出点时间码</th>
                     <th>镜头时长</th>
                     <th>对应帧数区间</th>
+                    <th>本机画面预览（点击放大）</th>
                 </tr>
             </thead>
             <tbody>
