@@ -15,7 +15,7 @@ DEFAULT_FONTS = (
     "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
 )
 
-FILTER_STRING = "subtitles=filename=subtitles.srt:fontsdir=fonts:force_style='FontSize=28,MarginV=40'"
+FILTER_STRING = "subtitles=filename=subtitles.srt:fontsdir=fonts:force_style='FontSize=17,MarginV=40,PrimaryColour=&H0000FFFF,BorderStyle=3,OutlineColour=&H80000000,BackColour=&H80000000,Outline=2,Shadow=0'"
 
 
 def _is_valid_font(path: str) -> bool:
@@ -51,7 +51,7 @@ def prepare_subtitle_assets(
     ext = os.path.splitext(candidate)[1].lower()
     shutil.copyfile(candidate, os.path.join(fonts_dir, f"font{ext}"))
     family = choose_font_family(os.path.basename(candidate), subtitle_font_name)
-    return FILTER_STRING.replace("FontSize=28", "FontName=" + family + ",FontSize=28"), os.path.basename(candidate)
+    return FILTER_STRING.replace("FontSize=17", "FontName=" + family + ",FontSize=17"), os.path.basename(candidate)
 
 
 def normalize_subtitle_text(narration: str) -> str:
