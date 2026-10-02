@@ -15,7 +15,7 @@
 
 AGY以显式模型`gemini-3.8-flash-high`生成代码。无头工具权限不足，未修改全局授权或使用宽泛跳过权限；改为AGY输出代码文本，由Codex审查落盘、修正接口接入和明显生成错误后独立执行。
 
-新增模块测试21项、CLI测试3项，完整`python -m pytest -q`为**91 passed**（原67项也通过）。新模块缺失及CLI未接入时实际检查失败；随后畸形根JSON、错误段落类型、布尔偏移4个回归在初版实际失败，输入校验补充后通过。测试错误断言经过收紧，未保留接受任意Exception的伪保护，也未保留猜测文件名或切换目录后重试的测试。
+新增模块测试26项、CLI测试3项，完整`python -m pytest -q`为**96 passed**（原67项也通过）。新模块缺失及CLI未接入时实际检查失败；随后畸形根JSON、错误段落类型、布尔偏移4个回归在初版实际失败，输入校验补充后通过。测试错误断言经过收紧，未保留接受任意Exception的伪保护，也未保留猜测文件名或切换目录后重试的测试。
 
 合成稿 `examples/stage2-script-sample.txt` 实际拆为3段、state=draft、sample=true。使用真实生成页面的JavaScript，在Node隔离上下文中提供模拟输入控件，实际调用导出函数，获得绑定原文与哈希的3段requirements.json；再通过函数及CLI导入到新目录，state=confirmed且sample仍为true。确认字段为测试填写，不代表真实口播稿或人工验收已通过。
 
@@ -36,3 +36,7 @@ python -m vmv script-review --draft outputs/stage2/sample-draft/segments.json \
 ```
 
 阶段2独立分支基于PR #5当前代码，交付PR以`feat/stage1-media-import`为base，仅包含阶段2差异。不自动合并任一PR，也不将阶段1或阶段2计为用户验收完成。
+
+## 独立审查补充
+
+独立审查在初版发现合成需求导出缺少sample，以及requirements可选偏移未校验。AGY生成最小修正片段，Codex审查时修正其误将可选偏移当作必填的问题；补充5个非法偏移/合成标识回归，修正前全部失败，修正后全套96项通过。重新执行真实生成页面的导出函数（Node模拟控件），导出sample=true、3段需求，再经CLI确认导回成功。初次CLI复跑因未设置src导入路径失败，设置PYTHONPATH=src后成功；不将失败算作通过。浏览器验收限制保持不变。

@@ -125,7 +125,7 @@ function exportRequirements() {{
       status: c.querySelector('.f-status').value
     }};
   }});
-  const out = {{ source_sha256: INITIAL_DATA.source_sha256, segments: segments }};
+  const out = {{ source_sha256: INITIAL_DATA.source_sha256, sample: INITIAL_DATA.sample, segments: segments }};
   const blob = new Blob([JSON.stringify(out, null, 2)], {{ type: 'application/json' }});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -237,6 +237,10 @@ def confirm_script(draft_path: str | Path, requirements_path: str | Path, output
     if req_root_keys - {"source_sha256", "segments", "state", "sample"}:
         raise ValueError("Requirements has unexpected root keys")
 
+    if "sample" in req:
+        if type(req["sample"]) is not bool or req["sample"] != draft["sample"]:
+            raise ValueError("sample must be a bool matching draft sample")
+
     req_segments = req.get("segments")
     if not isinstance(req_segments, list) or len(req_segments) != len(draft_segments):
         raise ValueError("Requirements segments count or type mismatch")
@@ -257,6 +261,10 @@ def confirm_script(draft_path: str | Path, requirements_path: str | Path, output
             raise ValueError(f"Segment ID mismatch: expected {ds['id']}, got {rs['id']}")
         if rs["narration"] != ds["narration"]:
             raise ValueError(f"Segment narration tamper in {ds['id']}")
+
+        for key in ("start", "end"):
+            if key in rs and (type(rs[key]) is not int or rs[key] != ds[key]):
+                raise ValueError(f"{key} must be an int matching draft segment")
 
         for fld in expected_fields:
             if not isinstance(rs[fld], str):

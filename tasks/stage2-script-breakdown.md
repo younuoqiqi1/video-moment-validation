@@ -16,4 +16,4 @@ AGY使用显式模型gemini-3.8-flash-high执行源代码编辑；Codex监督范
 
 ## 首版交付状态
 
-实现代码`9587f750f3df8ed25c7b761a3e09ea18f0d09cd7`已完成；独立全套91项测试通过，3段合成稿拆段、实际页面JavaScript导出及CLI确认导入已验证。AGY无头文件/命令权限不足，实际以指定模型生成代码文本，由Codex审查落盘和运行检查；未扩大全局权限。浏览器file协议受安全策略限制，未完成渲染/实际下载验证，用户真实稿也未验证。详见reports/stage2-script-breakdown.md；保持awaiting_review，不进入阶段3。
+实现代码`9587f750f3df8ed25c7b761a3e09ea18f0d09cd7`已完成；独立全套96项测试通过，3段合成稿拆段、实际页面JavaScript导出及CLI确认导入已验证。AGY无头文件/命令权限不足，实际以指定模型生成代码文本，由Codex审查落盘和运行检查；未扩大全局权限。浏览器file协议受安全策略限制，未完成渲染/实际下载验证，用户真实稿也未验证。详见reports/stage2-script-breakdown.md；保持awaiting_review，不进入阶段3。

@@ -73,7 +73,7 @@ def test_confirm_roundtrip(tmp_path):
     assert all(s['status'] == 'confirmed' for s in result['segments'])
 
 
-@pytest.mark.parametrize('case', ['hash', 'draft_hash', 'offset', 'duplicate', 'missing', 'unknown', 'order', 'text', 'type', 'empty', 'unconfirmed', 'draft_root', 'req_root', 'segment_type', 'offset_bool'])
+@pytest.mark.parametrize('case', ['hash', 'draft_hash', 'offset', 'duplicate', 'missing', 'unknown', 'order', 'text', 'type', 'empty', 'unconfirmed', 'draft_root', 'req_root', 'segment_type', 'offset_bool', 'req_offset_type', 'req_offset_bool', 'req_offset_value', 'sample_type', 'sample_mismatch'])
 def test_confirm_tampering_rejected(tmp_path, case):
     path, draft, req = fixture_draft(tmp_path)
     if case == 'hash': req['source_sha256'] = 'a'*64
@@ -91,6 +91,11 @@ def test_confirm_tampering_rejected(tmp_path, case):
     elif case == 'req_root': req = None
     elif case == 'segment_type': draft['segments'][0] = []
     elif case == 'offset_bool': draft['segments'][0]['start'] = False
+    elif case == 'req_offset_type': req['segments'][0]['start'] = 'bad'
+    elif case == 'req_offset_bool': req['segments'][0]['start'] = False
+    elif case == 'req_offset_value': req['segments'][0]['end'] = 9999
+    elif case == 'sample_type': req['sample'] = 0
+    elif case == 'sample_mismatch': req['sample'] = True
     path.write_text(json.dumps(draft, ensure_ascii=False))
     req_path = tmp_path / 'requirements.json'
     req_path.write_text(json.dumps(req, ensure_ascii=False))
