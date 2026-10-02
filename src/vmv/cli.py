@@ -85,12 +85,52 @@ def build_parser() -> argparse.ArgumentParser:
     parser_review.add_argument("--draft", required=True, type=Path)
     parser_review.add_argument("--requirements", required=True, type=Path)
     parser_review.add_argument("--output", type=Path, default=Path("outputs/stage2/confirmed"))
+    for command, flags in {
+        "retrieve": ("script", "catalog", "video", "output"),
+        "caption-packet": ("catalog", "video", "output"),
+        "caption-import": ("packet", "response", "output"),
+        "candidate-review": ("candidates", "review", "output"),
+    }.items():
+        sub = subparsers.add_parser(command)
+        for flag in flags:
+            sub.add_argument("--" + flag, required=True, type=Path)
+        if command == "retrieve":
+            sub.add_argument("--assisted-rankings", type=Path)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command in ("retrieve", "caption-packet", "caption-import", "candidate-review"):
+        import json
+        import subprocess
+        from vmv.retrieval import run_retrieval, validate_review
+        from vmv.retrieval_assistance import export_analysis_packet, import_descriptions
+        try:
+            if args.command == "retrieve":
+                run_retrieval(args.script, args.catalog, args.video, args.output, args.assisted_rankings)
+            elif args.command == "caption-packet":
+                export_analysis_packet(args.catalog, args.video, args.output)
+            elif args.command == "caption-import":
+                import_descriptions(args.packet, args.response, args.output)
+            else:
+                if args.output.exists():
+                    raise FileExistsError("输出文件已存在")
+                doc = json.loads(args.candidates.read_text(encoding="utf-8"))
+                review = json.loads(args.review.read_text(encoding="utf-8"))
+                validate_review(review, doc)
+                with args.output.open("x", encoding="utf-8") as handle:
+                    json.dump(review, handle, ensure_ascii=False, indent=2)
+            print("阶段3产物已生成；候选质量仍需人工审核。")
+            return 0
+        except (ValueError, OSError, RuntimeError) as e:
+            print(f"错误: {e}")
+            return 1
+        except subprocess.SubprocessError:
+            print("错误: 媒体处理失败或超时，未完成交付")
+            return 1
 
     if args.command in ("script", "script-review"):
         from vmv.script import prepare_script, confirm_script
