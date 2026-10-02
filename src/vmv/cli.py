@@ -76,12 +76,44 @@ def build_parser() -> argparse.ArgumentParser:
     preview_parser.add_argument("--scenes", type=Path, required=True)
     preview_parser.add_argument("--video", type=Path, required=True)
     preview_parser.add_argument("--output", type=Path, default=Path("outputs/stage1/preview"))
+    parser_script = subparsers.add_parser("script")
+    parser_script.add_argument("--input", required=True, type=Path)
+    parser_script.add_argument("--output", type=Path, default=Path("outputs/stage2/draft"))
+    parser_script.add_argument("--sample", action="store_true")
+
+    parser_review = subparsers.add_parser("script-review")
+    parser_review.add_argument("--draft", required=True, type=Path)
+    parser_review.add_argument("--requirements", required=True, type=Path)
+    parser_review.add_argument("--output", type=Path, default=Path("outputs/stage2/confirmed"))
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command in ("script", "script-review"):
+        from vmv.script import prepare_script, confirm_script
+        try:
+            if args.command == "script":
+                res = prepare_script(args.input, args.output, sample=args.sample)
+            else:
+                if not getattr(args, "draft", None):
+                    raise ValueError("缺少 --draft 参数")
+                res = confirm_script(args.draft, args.requirements, args.output)
+            state = res.get("state", "")
+            state_cn = {"draft": "草稿", "confirmed": "已确认"}.get(state, state)
+            count = len(res.get("segments") or [])
+            print(f"状态: {state_cn} ({state})")
+            print(f"分段数量: {count}")
+            if res.get("sample"):
+                print("【合成测试稿】")
+            if state == "draft" or args.command == "script":
+                print("提示: 草稿需要复核 (draft needs review)")
+            return 0
+        except (ValueError, UnicodeError, OSError) as e:
+            print(f"错误: {e}")
+            return 1
 
     if args.command == "status":
         output_path: Path = args.output
