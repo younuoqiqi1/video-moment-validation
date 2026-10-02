@@ -96,12 +96,18 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument("--" + flag, required=True, type=Path)
         if command == "retrieve":
             sub.add_argument("--assisted-rankings", type=Path)
+    from vmv.production_cli import register_stage4
+    register_stage4(subparsers)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command in ("production-edit", "build-order"):
+        from vmv.production_cli import run_stage4
+        return run_stage4(args)
 
     if args.command in ("retrieve", "caption-packet", "caption-import", "candidate-review"):
         import json

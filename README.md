@@ -1,6 +1,6 @@
 > 阶段3色块流程已获用户确认通过；真实素材检索质量仍待验证。
 
-> 当前：阶段2合成流程已由用户验收；阶段3候选审核合成首版待验收，全套158项测试通过。详见[阶段3报告](reports/stage3-candidate-retrieval.md)。阶段1全量视觉验收继续保留，未启动生产单/TTS。
+> 当前：阶段4镜头编排与生产单已实现，待用户验收；阶段2/3合成流程已确认，真实素材全量检索质量仍未验证。阶段5未启动。详见[阶段4报告](reports/stage4-production-order.md)。
 
 # 数智博主视频镜头检索技术验证
 
@@ -35,3 +35,17 @@ Notion 同步看板：[老周聊《潜伏》技术验证｜进度与阶段验收
 - `data/work/`：抽帧、切片、索引等中间文件
 - `outputs/`：候选片段、生产单、MP4 和验证报告
 - `.env`：阿里云 TTS 等密钥
+
+
+## 阶段4：镜头编排与生产单
+
+从阶段3候选目录生成独立编辑页，口播和候选画面同页展示。每段可勾选多个镜头，调整原片入出点，并用上下按钮改变采用顺序。导出 `selection.json` 后，命令行再次校验并写出生产单：
+
+```bash
+vmv production-edit --candidates outputs/stage3/candidates.json --output outputs/stage4/editor
+vmv build-order --script outputs/stage2/script.json --candidates outputs/stage4/editor/candidates.json --catalog data/work/catalog.json --selection outputs/stage4/editor/selection.json --media outputs/stage1/media_manifest.json --output outputs/stage4/production-order.json
+```
+
+将浏览器导出的选择文件保存到命令指定位置；命令中的脚本、目录与媒体清单必须是候选文档绑定的原始版本。输出目录或生产单已存在会拒绝覆盖，修改选择后请指定新输出文件。选择文件使用 `segments[].shots[].shot_id/in_sec/out_sec`，入出点采用原片绝对秒数。
+
+生产单保存原片时间、累计时间线和输入文件哈希。`ready_for_tts` 表示可交给下一步；时间线目前按所选原片长度累计，尚未按口播配音定时，不能据此判定最终节奏合格。
