@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "阶段4生产单；跨字段时间范围与来源绑定由运行时校验。时间线尚未按配音定时。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "state",
+    "sample",
+    "media_id",
+    "source_sha256",
+    "document_sha256",
+    "source_path",
+    "timing_basis",
+    "duration_sec",
+    "segments"
+  ],
+  "properties": {
+    "state": {
+      "const": "ready_for_tts"
+    },
+    "sample": {
+      "type": "boolean"
+    },
+    "media_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "source_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "document_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "source_path": {
+      "type": "string"
+    },
+    "timing_basis": {
+      "const": "source_clip_duration_not_voice"
+    },
+    "duration_sec": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "source_bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "script_sha256",
+        "catalog_sha256",
+        "candidate_file_sha256",
+        "document_sha256",
+        "selection_sha256",
+        "media_manifest_sha256"
+      ],
+      "properties": {
+        "script_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "catalog_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "candidate_file_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "document_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "selection_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "media_manifest_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "segments": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "narration",
+          "shots"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "narration": {
+            "type": "string"
+          },
+          "shots": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "shot_id",
+                "source_in_sec",
+                "timeline_in_sec",
+                "source_out_sec",
+                "timeline_out_sec"
+              ],
+              "properties": {
+                "shot_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "source_in_sec": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "timeline_in_sec": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "source_out_sec": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "timeline_out_sec": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
