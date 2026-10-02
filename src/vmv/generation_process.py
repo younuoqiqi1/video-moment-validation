@@ -6,13 +6,14 @@ import threading
 from types import SimpleNamespace
 
 
-def run_generation(argv, timeout=60):
+def run_generation(argv, timeout=60, *, cwd=None):
     proc = subprocess.Popen(
         argv,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         start_new_session=True,
+        cwd=cwd,
     )
 
     def cleanup():
@@ -48,4 +49,4 @@ def run_generation(argv, timeout=60):
     if proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, argv, output=stdout)
 
-    return SimpleNamespace(stdout=stdout)
+    return SimpleNamespace(stdout=stdout, stderr=stderr)

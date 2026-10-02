@@ -98,12 +98,18 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument("--assisted-rankings", type=Path)
     from vmv.production_cli import register_stage4
     register_stage4(subparsers)
+    from vmv.stage5_cli import register_stage5
+    register_stage5(subparsers)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command in ("audio-import", "render"):
+        from vmv.stage5_cli import run_stage5
+        return run_stage5(args)
 
     if args.command in ("production-edit", "build-order"):
         from vmv.production_cli import run_stage4

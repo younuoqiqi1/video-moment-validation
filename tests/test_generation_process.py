@@ -29,3 +29,9 @@ def test_success_returns_stdout_and_restores_signal_handler():
     result = run_generation([sys.executable, '-c', 'print("ok")'])
     assert result.stdout == 'ok\n'
     assert signal.getsignal(signal.SIGTERM) == old
+
+
+def test_process_working_directory_and_stderr(tmp_path):
+    result = run_generation([sys.executable, '-c', 'from pathlib import Path; import sys; print(Path.cwd()); print("diagnostic",file=sys.stderr)'], cwd=tmp_path)
+    assert result.stdout.strip() == str(tmp_path)
+    assert result.stderr.strip() == 'diagnostic'
