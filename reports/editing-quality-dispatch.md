@@ -2,6 +2,8 @@
 
 日期：2026-10-02（Asia/Shanghai）。对应PR #11，任务 `tasks/editing-quality-pilot.md`。
 
+本回执保留首次下发的历史状态；最新源码、试剪及验证进展见 `reports/editing-quality-pilot-progress.md`。
+
 ## 实际完成
 
 - 用户明确授权后新增独立任务分支和草稿PR，基于现有阶段5代码，不修改旧任务，不合并既有PR。
