@@ -1,6 +1,6 @@
 > 阶段3色块流程已获用户确认通过；真实素材检索质量仍待验证。
 
-> 当前：阶段4镜头编排与生产单已实现，待用户验收；阶段2/3合成流程已确认，真实素材全量检索质量仍未验证。阶段5未启动。详见[阶段4报告](reports/stage4-production-order.md)。
+> 当前：阶段5本地模拟配音短样片首版已实现，待用户验收；全套237项测试通过。真实素材全量检索质量与正式音色仍待验证。详见[阶段5报告](reports/stage5-voice-render.md)。
 
 # 数智博主视频镜头检索技术验证
 
@@ -49,3 +49,21 @@ vmv build-order --script outputs/stage2/script.json --candidates outputs/stage4/
 将浏览器导出的选择文件保存到命令指定位置；命令中的脚本、目录与媒体清单必须是候选文档绑定的原始版本。输出目录或生产单已存在会拒绝覆盖，修改选择后请指定新输出文件。选择文件使用 `segments[].shots[].shot_id/in_sec/out_sec`，入出点采用原片绝对秒数。
 
 生产单保存原片时间、累计时间线和输入文件哈希。`ready_for_tts` 表示可交给下一步；时间线目前按所选原片长度累计，尚未按口播配音定时，不能据此判定最终节奏合格。
+
+
+## 阶段5：本地配音模拟与短样片
+
+先使用认可的本地语音文件运行链路；目前不调用云端TTS，不使用示例API密钥。导入时复制音频快照并绑定原始生产单、段落和音频哈希；渲染前再次核对原片及音频：
+
+```bash
+vmv audio-import --order outputs/stage4/production-order.json --audio seg-001=outputs/voice/seg-001.wav --output outputs/stage5/audio
+vmv render --order outputs/stage4/production-order.json --media-root . --audio-manifest outputs/stage5/audio/audio_manifest.json --output outputs/stage5/rendered
+```
+
+多段稿为每段重复提供 `--audio SEG_ID=FILE`，必须完整覆盖生产单段落。支持WAV/AIFF/AIF/MP3。渲染输出 `sample.mp4`、`subtitles.srt`、`voice-timeline.json`、`render-report.json`，保留源文件和已有输出；已有输出目录会拒绝覆盖。
+
+每段按实际配音长度向上对齐25fps帧数，按已选镜头容量分配，每镜头至少一帧，从所选入点截取并保持原速。配音超出可用素材、镜头数量超过可分配帧数时失败，不补长镜头或冻结画面。原片声音不混入模拟配音；原片内嵌字幕保留，另加口播字幕。
+
+依赖FFmpeg、ffprobe和可用中文字体。Mac自动使用Heiti SC/Songti SC，Linux尝试本地Noto CJK；其他字体可通过 `--subtitle-font FILE --subtitle-font-name FAMILY` 显式指定，不自动下载或安装。文字缺字时报错，不把方框字幕作为成功产物。最终FFmpeg使用受管临时工作目录，支持空格和单引号路径；进程组在失败、超时和退出时清理。单次导入/渲染处理总限60秒，样片上限180秒；较长或复杂素材需要分段处理，不能绕过超时限制。
+
+短样片只验证合成链路，正式声音、完整稿匹配与裁切叙事仍需验收。云TTS适配等待具体产品文档与本地配置。
