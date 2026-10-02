@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "stage": 6,
+  "date": "2026-10-03",
+  "artifact_version": "full-production-r2-final",
+  "status": "evaluation_delivered_pending_content_acceptance",
+  "metrics": {
+    "candidate_usable_rate": {
+      "value": null,
+      "status": "unknown",
+      "evidence": "设计第六节：前3候选中至少1个可用的脚本段数/总脚本段数",
+      "missing_reason": "没有冻结的全量top3候选逐段审核结果和可核对分母",
+      "numerator": null,
+      "denominator": null,
+      "target": 0.8
+    },
+    "material_coverage_rate": {
+      "value": null,
+      "status": "unknown",
+      "evidence": "设计第六节：现有素材支持的脚本段数/总脚本段数",
+      "missing_reason": "最终手选片段不能替代全量脚本支持审核",
+      "numerator": null,
+      "denominator": null
+    },
+    "duration_sec": {
+      "value": 156.32,
+      "status": "passed",
+      "evidence": "reports/editing-quality-full-video.md 第二次修订；本地成片verification与manifest已由Codex复核",
+      "missing_reason": null,
+      "max_sec": 180
+    },
+    "frames": {
+      "value": 3908,
+      "status": "verified",
+      "evidence": "reports/editing-quality-full-video.md 第二次修订；本地成片verification与manifest已由Codex复核",
+      "missing_reason": null
+    },
+    "fps": {
+      "value": 25,
+      "status": "verified",
+      "evidence": "reports/editing-quality-full-video.md 第二次修订；本地成片verification与manifest已由Codex复核",
+      "missing_reason": null
+    },
+    "resolution": {
+      "value": [
+        1920,
+        1080
+      ],
+      "status": "verified",
+      "evidence": "reports/editing-quality-full-video.md 第二次修订；本地成片verification与manifest已由Codex复核",
+      "missing_reason": null
+    },
+    "visual_clip_count": {
+      "value": 52,
+      "status": "verified",
+      "evidence": "reports/editing-quality-full-video.md 第二次修订；本地成片verification与manifest已由Codex复核",
+      "missing_reason": null
+    },
+    "technical_checks": {
+      "value": {
+        "full_decode": true,
+        "final_audio_pcm_equal_to_mix": true,
+        "source_intervals_valid": true,
+        "removed_sentence_caption_absent": true,
+        "following_captions_shifted_sec": 3.32
+      },
+      "status": "passed",
+      "evidence": "reports/editing-quality-full-video.md 第二次修订；本地成片verification与manifest已由Codex复核",
+      "missing_reason": null
+    },
+    "subjective_quality": {
+      "value": null,
+      "status": "pending_user_review",
+      "evidence": "15秒B获认可；扩展段后半平；C2整体方向基本认可；用户确认删掉残句",
+      "missing_reason": "最新完整第二版尚无明确最终主观验收"
+    },
+    "manual_edits": {
+      "value": {
+        "shot_replacements": null,
+        "timecode_adjustments": null,
+        "script_edits": null,
+        "active_minutes": null
+      },
+      "status": "unknown",
+      "evidence": "已保存若干版本及修订报告",
+      "missing_reason": "没有全程逐操作日志与计时，不能用反馈次数或片段数代替"
+    },
+    "observed_latest_diff": {
+      "value": {
+        "reviewed_old_clip_slots": 10,
+        "replaced_or_retimed_slots": 9,
+        "retained_slots": 1,
+        "split_slots": 1,
+        "removed_incomplete_sentences": 1,
+        "removed_duration_sec": 3.32
+      },
+      "status": "verified",
+      "evidence": "最新版本manifest对照与修订记录；仅限最后一轮，不是全程人工操作次数",
+      "missing_reason": null
+    },
+    "scene_concentration_case": {
+      "value": {
+        "window_duration_sec": 33,
+        "before_same_scene_sec": 30.08,
+        "after_same_scene_sec": 4.48
+      },
+      "status": "verified",
+      "evidence": "两版时间线对照；仅对应用户指出的局部范围，不是全片重复率",
+      "missing_reason": null
+    },
+    "time_and_cost": {
+      "media_parse": {
+        "value": {
+          "elapsed_sec": null,
+          "cost": null,
+          "currency": null
+        },
+        "status": "unknown",
+        "evidence": "reports/stage2-stage3-token-accounting.md；既有阶段报告",
+        "missing_reason": "首次运行计时和账单未齐全；本次使用已有MP3无新TTS不能视为整个项目免费"
+      },
+      "retrieval": {
+        "value": {
+          "elapsed_sec": null,
+          "cost": null,
+          "currency": null
+        },
+        "status": "unknown",
+        "evidence": "reports/stage2-stage3-token-accounting.md；既有阶段报告",
+        "missing_reason": "首次运行计时和账单未齐全；本次使用已有MP3无新TTS不能视为整个项目免费"
+      },
+      "voice": {
+        "value": {
+          "elapsed_sec": null,
+          "cost": null,
+          "currency": null
+        },
+        "status": "unknown",
+        "evidence": "reports/stage2-stage3-token-accounting.md；既有阶段报告",
+        "missing_reason": "首次运行计时和账单未齐全；本次使用已有MP3无新TTS不能视为整个项目免费"
+      },
+      "render": {
+        "value": {
+          "elapsed_sec": null,
+          "cost": null,
+          "currency": null
+        },
+        "status": "unknown",
+        "evidence": "reports/stage2-stage3-token-accounting.md；既有阶段报告",
+        "missing_reason": "首次运行计时和账单未齐全；本次使用已有MP3无新TTS不能视为整个项目免费"
+      }
+    },
+    "new_tts": {
+      "value": false,
+      "status": "verified",
+      "evidence": "使用用户已有MP3，最新经授权删掉残句，未合成补句",
+      "missing_reason": null
+    },
+    "source_duration_sec": {
+      "value": 2702.013243,
+      "status": "verified",
+      "evidence": "本机ffprobe当前读取原片时长",
+      "missing_reason": null
+    }
+  },
+  "decision": {
+    "recommendation": "continue_limited_validation",
+    "formal_target_assessment": "insufficient_evidence",
+    "explanation": "继续小范围验证检索与辅助剪辑，暂不扩大无人值守批量生产；工程链路已跑通，80%候选可用率、编辑投入与主观质量证据不足。"
+  },
+  "next_measurements": [
+    "冻结每段top3候选并逐段标记可用/不可用/待审，保留分母",
+    "逐段审核素材是否支持人物、情节与情绪，另记素材覆盖率",
+    "分开记录首次解析、检索、配音、合成耗时与可核对费用",
+    "记录每次换镜、时间码调整、改稿、操作者与有效操作分钟",
+    "审核完整录音句界、原声接点、长段场景集中、景别和运动连续性"
+  ],
+  "execution": {
+    "documentation_author": "Codex",
+    "agy_model_attempted": "gemini-3.8-flash-high",
+    "agy_result": "report_call_and_minimal_health_check_timed_out_no_files_created",
+    "source_code_changed": false
+  },
+  "scope_deviations": [
+    "本轮约45分钟单集原片，超过原设计20–30分钟测试范围",
+    "本轮已有MP3，未验证阿里云TTS",
+    "当前需人工编辑，不外推无人值守或全片库生产"
+  ]
+}
