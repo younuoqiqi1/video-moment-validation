@@ -1,0 +1,77 @@
+{
+  "note": "仅用于合成色块测试，confirmed由测试夹具构造，不代表用户真实稿或真实影视素材验收。视频须本机生成，source_sha256须按实际文件重算。",
+  "script": {
+    "sample": true,
+    "state": "confirmed",
+    "source_text": "红色画面。\n\n绿色画面。\n\n蓝色画面。",
+    "source_sha256": "924cad635a2f46624e14f43b137960ba2c57ce6203a9f6291ab5d7911c653397",
+    "segments": [
+      {
+        "id": "seg-001",
+        "start": 0,
+        "end": 5,
+        "narration": "红色画面。",
+        "characters": "无人物",
+        "setting": "合成色块",
+        "action": "显示红色画面",
+        "emotion": "未明确/待审核",
+        "visual_requirement": "红色画面",
+        "status": "confirmed"
+      },
+      {
+        "id": "seg-002",
+        "start": 7,
+        "end": 12,
+        "narration": "绿色画面。",
+        "characters": "无人物",
+        "setting": "合成色块",
+        "action": "显示绿色画面",
+        "emotion": "未明确/待审核",
+        "visual_requirement": "绿色画面",
+        "status": "confirmed"
+      },
+      {
+        "id": "seg-003",
+        "start": 14,
+        "end": 19,
+        "narration": "蓝色画面。",
+        "characters": "无人物",
+        "setting": "合成色块",
+        "action": "显示蓝色画面",
+        "emotion": "未明确/待审核",
+        "visual_requirement": "蓝色画面",
+        "status": "confirmed"
+      }
+    ]
+  },
+  "catalog": {
+    "sample": true,
+    "media_id": "synthetic-colors",
+    "description_source": "synthetic",
+    "source_sha256": "b7f2020b20add911694ecb7b5b68700e5558b32df4658c2dbd785594de3bd53f",
+    "duration_sec": 6,
+    "shots": [
+      {
+        "id": "shot-1",
+        "start_sec": 0,
+        "end_sec": 2,
+        "caption": "红色画面",
+        "subtitle": ""
+      },
+      {
+        "id": "shot-2",
+        "start_sec": 2,
+        "end_sec": 4,
+        "caption": "绿色画面",
+        "subtitle": ""
+      },
+      {
+        "id": "shot-3",
+        "start_sec": 4,
+        "end_sec": 6,
+        "caption": "蓝色画面",
+        "subtitle": ""
+      }
+    ]
+  }
+}
