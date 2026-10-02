@@ -21,7 +21,7 @@ def test_prepare_script_chinese_multiline_crlf_preserved(tmp_path):
     for s in data['segments']:
         assert source_text[s['start']:s['end']] == s['narration']
         assert s['status'] == 'needs_review'
-        assert s['visual_requirement'] == ''
+        assert s['visual_requirement'] == '测试生成内容'
 
 
 @pytest.mark.parametrize('raw,error', [(b'', ValueError), (b'\xff\xfe', UnicodeDecodeError)])
@@ -114,3 +114,11 @@ def test_existing_output_protected(tmp_path):
     with pytest.raises((FileExistsError, ValueError)):
         prepare_script(source, out)
     assert sentinel.read_text() == '保留'
+
+
+@pytest.fixture(autouse=True)
+def offline_generation(monkeypatch):
+    from vmv import script_generation
+    def generate(segments):
+        return [{key: '测试生成内容' for key in ('characters', 'setting', 'action', 'emotion', 'visual_requirement')} for segment in segments]
+    monkeypatch.setattr(script_generation, 'generate_requirements', generate)

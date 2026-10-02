@@ -100,7 +100,7 @@ def _render_html(data: dict) -> str:
 {sample_banner}
 <div class="header">
   <div>
-    <h1>分镜脚本审核 ({html.escape(data.get("state", ""))})</h1>
+    <h1>画面需求审核 ({html.escape(data.get("state", ""))})</h1>
     <div>哈希: <code>{html.escape(data.get("source_sha256", ""))}</code> | 段落数: {len(data.get("segments", []))}</div>
   </div>
   <button class="btn" onclick="exportRequirements()">下载 requirements.json</button>
@@ -156,6 +156,8 @@ def _write_outputs(output_dir: str | Path, data: dict):
 
 
 def prepare_script(input_path: str | Path, output_dir: str | Path, sample: bool = False) -> dict:
+    if Path(output_dir).exists():
+        raise FileExistsError(f"Output directory {output_dir!s} already exists")
     with open(input_path, "rb") as f:
         raw_bytes = f.read()
 
@@ -180,6 +182,12 @@ def prepare_script(input_path: str | Path, output_dir: str | Path, sample: bool 
             "visual_requirement": "",
             "status": "needs_review",
         })
+
+    from vmv.script_generation import generate_requirements
+    generated = generate_requirements(segments)
+    for segment, fields in zip(segments, generated):
+        for key in ("characters", "setting", "action", "emotion", "visual_requirement"):
+            segment[key] = fields[key]
 
     draft_data = {
         "source_sha256": source_sha256,

@@ -10,7 +10,7 @@ Notion 同步看板：[老周聊《潜伏》技术验证｜进度与阶段验收
 
 ## 当前状态
 
-2026-10-02：用户已授权阶段2，首版口播拆段与人工画面需求表支持`vmv script`和`vmv script-review`。先用 `examples/stage2-script-sample.txt` 合成稿验证，完整测试96项通过。使用方式及未验证项见[阶段2报告](reports/stage2-script-breakdown.md)。阶段1画面验收和阶段2真实稿/浏览器验收均未完成；阶段3未授权。
+2026-10-02：用户已授权阶段2，口播拆段、自动生成画面需求与审核编辑支持`vmv script`和`vmv script-review`。先用 `examples/stage2-script-sample.txt` 合成稿验证，完整测试129项通过，真实AGY生成3段合成稿已跑通。使用方式及未验证项见[阶段2报告](reports/stage2-script-breakdown.md)。阶段1画面验收和阶段2真实稿/浏览器验收均未完成；阶段3未授权。
 
 以下为早期环境记录，历史测试数量不代表当前结果：
 

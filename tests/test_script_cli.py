@@ -1,3 +1,4 @@
+import pytest
 import json
 from vmv.cli import main
 from pathlib import Path
@@ -108,3 +109,10 @@ def test_tamper_requirement_source_hash(tmp_path: Path):
     assert ret_review == 1
     assert not (confirmed_dir / "segments.json").exists()
     assert not (confirmed_dir / "summary.html").exists()
+
+@pytest.fixture(autouse=True)
+def offline_generation(monkeypatch):
+    from vmv import script_generation
+    def generate(segments):
+        return [{key: '测试生成内容' for key in ('characters', 'setting', 'action', 'emotion', 'visual_requirement')} for segment in segments]
+    monkeypatch.setattr(script_generation, 'generate_requirements', generate)
