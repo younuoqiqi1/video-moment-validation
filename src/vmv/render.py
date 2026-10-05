@@ -331,15 +331,14 @@ Dialogue: 0,{start_ts},{end_ts},Default,,0,0,0,,{formatted_text}
 
                 # 3. SUBTITLE: Create ASS subtitle
                 sub_text = narration_text
-                # If no narration but original dialogue, extract a suitable subtitle or dialog quote
+                # If no narration but original dialogue, use genuine dialogue from order if present
                 if not sub_text and audio_owner == "original_dialogue":
-                    visual_reason = metadata.get("visual_reason", "")
-                    if "金条" in visual_reason or "两根金条" in visual_reason or "scene_0139" in str(clip_info):
-                        sub_text = "谢若林：两根金条放在这，你能告诉我哪一根是高尚的，哪一根是龌龊的？"
-                    elif "scene_0044" in str(clip_info) or "站长" in visual_reason:
-                        sub_text = "吴敬中：没人信大义，只要这生意能做，余副站长就是你的。"
-                    else:
-                        sub_text = ""
+                    sub_text = (
+                        seg.get("original_dialogue_text")
+                        or metadata.get("dialogue_text")
+                        or clip_info.get("dialogue")
+                        or ""
+                    ).strip()
 
                 has_sub = burn_subs and bool(sub_text)
                 if has_sub:
