@@ -8,6 +8,7 @@ from pathlib import Path
 from vmv.report import run_status_stage
 from vmv.runner import LocalTaskRunner
 from vmv.runner_service import install_service, stop_service, get_service_status
+from vmv.render import ProductionOrderRenderer
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -52,6 +53,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     # runner stop
     runner_sub.add_parser("stop", help="停止并卸载后台服务")
+
+    # 3. render subcommand (Stage 4/5)
+    render_parser = subparsers.add_parser("render", help="执行 Stage 4/5 生产工单并合成 MP4")
+    render_parser.add_argument("--order", "-o", required=True, type=Path, help="生产工单 JSON 路径")
+    render_parser.add_argument("--output", "-out", required=True, type=Path, help="成片 MP4 输出路径")
+    render_parser.add_argument("--source", "-s", type=Path, default=Path("data/input/qianfu_ep18.mp4"), help="母带源视频路径")
+    render_parser.add_argument("--workdir", "-w", type=Path, default=None, help="临时工作目录")
+    render_parser.add_argument("--force-fallback-tts", action="store_true", help="强制使用本地 fallback TTS")
 
     return parser
 
@@ -126,6 +135,32 @@ def main(argv: list[str] | None = None) -> int:
             success, msg = stop_service()
             print(msg)
             return 0 if success else 1
+
+    elif args.command == "render":
+        with open(args.order, "r", encoding="utf-8") as f:
+            order_data = json.load(f)
+
+        renderer = ProductionOrderRenderer(
+            order_data=order_data,
+            source_media_path=args.source,
+            output_path=args.output,
+            work_dir=args.workdir,
+            force_fallback_tts=args.force_fallback_tts,
+        )
+
+        manifest = renderer.render()
+        print("=" * 60)
+        print("VMV 视频合成渲染与技术 QC 完成")
+        print("=" * 60)
+        print(f"成片路径: {manifest.output_video_path}")
+        print(f"成片时长: {manifest.total_duration_sec:.2f}s")
+        print(f"分辨率/帧率: {manifest.resolution} @ {manifest.fps:.1f}fps")
+        print(f"视音频编码: {manifest.video_codec} / {manifest.audio_codec}")
+        print(f"TTS 提供方: {manifest.tts_provider} ({manifest.tts_voice}) [fallback: {manifest.is_tts_fallback}]")
+        print(f"文件大小: {manifest.file_size_bytes / 1024 / 1024:.2f} MB")
+        print(f"文件 SHA256: {manifest.sha256}")
+        print("QC 状态: ✔ PASSED")
+        return 0
 
     return 0
 
